@@ -1,0 +1,66 @@
+{
+  "name": "pharma-system-backend",
+  "version": "1.0.0",
+  "description": "Backend لنظام إدارة شركة أدوية سودانية (Company + Warehouse + Pharmacies)",
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "seed": "node src/scripts/seed.js",
+    "seed:test": "node src/scripts/seed-test-users.js",
+    "seed:master": "node src/scripts/seed-master-data.js",
+    "seed:finance": "node src/scripts/seed-phase3-finance.js",
+    "seed:invoices": "node src/scripts/seed-test-invoices.js",
+    "seed:all": "node src/scripts/seed-all.js",
+    "seed:force": "node src/scripts/seed-all.js --force",
+    "seed:fast": "node src/scripts/seed-all.js --yes --skip-jobs",
+    "backup:now": "node -e \"import('./src/jobs/autoBackup.js').then(m => m.runAutoBackup())\"",
+    "test-jobs": "node src/scripts/test-jobs.js",
+    "test:jobs": "node src/scripts/test-jobs.js",
+    "lint": "eslint \"src/**/*.js\"",
+    "lint:fix": "eslint \"src/**/*.js\" --fix",
+    "format": "prettier --write \"src/**/*.js\""
+  },
+  "keywords": [
+    "pharma",
+    "sudan",
+    "erp",
+    "express",
+    "mongodb"
+  ],
+  "author": "Pharma System Team",
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "compression": "^1.7.4",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "date-fns": "^3.6.0",
+    "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.2.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.4.0",
+    "morgan": "^1.10.0",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.13",
+    "puppeteer-core": "^25.16.0",
+    "web-push": "^3.6.7",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-import": "^2.29.1",
+    "eslint-plugin-node": "^11.1.0",
+    "nodemon": "^3.1.0",
+    "prettier": "^3.2.5"
+  }
+}

@@ -1,0 +1,59 @@
+# ═══════════════════════════════════════════════
+# EditorConfig — Pharma System
+# ═══════════════════════════════════════════════
+# يوحّد إعدادات المحرر بين المطورين
+# ═══════════════════════════════════════════════
+
+root = true
+
+# ✅ الإعدادات الافتراضية لكل الملفات
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+max_line_length = 100
+
+# ✅ ملفات JavaScript / JSX
+[*.{js,jsx,mjs,cjs}]
+indent_size = 2
+quote_type = single
+
+# ✅ ملفات JSON
+[*.json]
+indent_size = 2
+
+# ✅ ملفات CSS
+[*.{css,scss}]
+indent_size = 2
+
+# ✅ ملفات HTML
+[*.html]
+indent_size = 2
+
+# ✅ ملفات Markdown
+[*.md]
+trim_trailing_whitespace = false
+max_line_length = off
+
+# ✅ ملفات YAML
+[*.{yml,yaml}]
+indent_size = 2
+
+# ✅ ملفات PowerShell
+[*.ps1]
+indent_size = 4
+
+# ✅ ملفات Batch
+[*.{bat,cmd}]
+end_of_line = crlf
+
+# ✅ ملفات Shell
+[*.sh]
+indent_size = 2
+
+# ✅ ملفات .env
+[.env*]
+insert_final_newline = true

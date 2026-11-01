@@ -1,0 +1,22 @@
+# ═══════════════════════════════════════════════
+# robots.txt — Pharma System
+# ═══════════════════════════════════════════════
+# يمنع محركات البحث من فهرسة التطبيق
+# (نظام داخلي — لا يجب أن يظهر في Google)
+# ═══════════════════════════════════════════════
+
+User-agent: *
+Disallow: /
+
+# ✅ السماح بملفات PWA الأساسية
+Allow: /manifest.webmanifest
+Allow: /favicon.ico
+Allow: /logo.png
+Allow: /icons/
+
+# ✅ منع الوصول لملفات البناء
+Disallow: /assets/
+Disallow: /dist/
+
+# ✅ Sitemap (إن وُجد لاحقاً)
+# Sitemap: https://your-domain.com/sitemap.xml

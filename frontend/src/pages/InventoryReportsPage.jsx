@@ -81,7 +81,8 @@ export default function InventoryReportsPage() {
 
   useEffect(() => {
     loadReport();
-    // eslint-disable-next-line react-hooks/exhaustive-deps  }, [activeTab]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps  
+    }, [activeTab]);
 
   const setTab = (key) => {
     setSearchParams({ tab: key });

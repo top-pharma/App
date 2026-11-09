@@ -23,7 +23,7 @@ import logger from '../utils/logger.js';
  * ───────────────────────────────────────────────────────────── */
 export const listCashFunds = async (req, res, next) => {
   try {
-    const { page, limit, search, isActive, sortBy, sortOrder } = req.query;
+   const { page, limit, search, isActive, sortBy, sortOrder } = req.validatedQuery || req.query;
 
     const filter = {};
     if (search) {
@@ -96,13 +96,13 @@ export const createCashFund = async (req, res, next) => {
     // 3) إنشاء الصندوق
     const fund = await CashFund.create({ ...req.body, code });
 
-    // 4) إذا طُلب isDefault = true، نُلغي default من غيره
-    if (fund.isDefault) {
-      await CashFund.updateMany(
-        { _id: { $ne: fund._id } },
-        { $set: { isDefault: false } }
-      );
-    }
+    // // 4) إذا طُلب isDefault = true، نُلغي default من غيره
+    // if (fund.isDefault) {
+    //   await CashFund.updateMany(
+    //     { _id: { $ne: fund._id } },
+    //     { $set: { isDefault: false } }
+    //   );
+    // }
 
     // 5) قيد افتتاحي إذا كان الرصيد > 0
     if (fund.openingBalance > 0) {
@@ -393,7 +393,7 @@ export const cashFundMovement = async (req, res, next) => {
  * ───────────────────────────────────────────────────────────── */
 export const getFundTransactions = async (req, res, next) => {
   try {
-    const { page = 1, limit = 20, from, to } = req.query;
+    const { page = 1, limit = 20, from, to } = req.validatedquery || req.query;
 
     const filter = { cashFundId: req.params.id };
     if (from || to) {

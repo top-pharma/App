@@ -2,19 +2,15 @@
  * @file SalesPage.jsx
  * @description
  * الصفحة الرئيسية (Hub) لقسم المبيعات.
- * تجمع روابط الأقسام الفرعية في بطاقات كبيرة + إحصاءات سريعة.
  *
- * لماذا هذا الملف؟
- * - تُجنّب ازدحام القائمة الجانبية (Sidebar) بعناصر كثيرة.
- * - تُوفّر نظرة سريعة على حالة المبيعات (فواتير متأخرة، إيصالات معلقة).
- * - تتبع نمط InventoryPage.jsx (Hub pattern) للاتساق البصري.
- * - تُظهر البطاقات حسب صلاحيات المستخدم.
+ * ✅ 🅱 (2026-11-08):
+ * - حذف `useDeliveryNotes` + HubCard "إيصالات التسليم" + `deliveryStats`.
  */
 
 import { Link } from 'react-router-dom';
 import {
   FileText,
-  Truck,
+  // ⚠️ 🅱: حُذف Truck
   Undo2,
   Receipt,
   ArrowLeftRight,
@@ -26,27 +22,15 @@ import {
 
 import { useAuth } from '../hooks/useAuth.js';
 import { useInvoices } from '../hooks/useInvoices.js';
-import { useDeliveryNotes } from '../hooks/useDeliveryNotes.js';
+// ⚠️ 🅱: حُذف useDeliveryNotes
 import { useCustomerReturns } from '../hooks/useCustomerReturns.js';
 import Card from '../components/UI/Card.jsx';
 import { formatNumber } from '../utils/formatters.js';
 
 // ═══════════════════════════════════════════════
-// 1. مكون البطاقة (قابل لإعادة الاستخدام)
+// 1. مكون البطاقة
 // ═══════════════════════════════════════════════
 
-/**
- * بطاقة قسم (تُستخدم للربط مع صفحة فرعية).
- * @param {Object} props
- * @param {string} props.to - المسار
- * @param {React.ComponentType} props.icon - الأيقونة
- * @param {string} props.title - العنوان
- * @param {string} props.description - الوصف
- * @param {string} [props.color='primary'] - اللون (primary/success/warning/danger/info)
- * @param {number} [props.badge] - رقم الإشعار (اختياري)
- * @param {string} [props.badgeColor='danger'] - لون الشارة
- * @returns {JSX.Element}
- */
 function HubCard({
   to,
   icon: Icon,
@@ -56,7 +40,6 @@ function HubCard({
   badge,
   badgeColor = 'danger',
 }) {
-  // خريطة الألوان
   const colorClasses = {
     primary: 'bg-primary-50 text-primary-800 group-hover:bg-primary-100',
     success: 'bg-success-50 text-success-700 group-hover:bg-success-100',
@@ -76,7 +59,6 @@ function HubCard({
       to={to}
       className="group block bg-white rounded-lg border border-neutral-200 p-6 shadow-sm hover:shadow-md hover:border-primary-300 transition-all duration-200 relative"
     >
-      {/* الشارة (رقم الإشعار) */}
       {badge > 0 && (
         <span
           className={`absolute top-3 left-3 min-w-[28px] h-7 px-2 rounded-full text-xs font-bold flex items-center justify-center ${badgeClasses[badgeColor]}`}
@@ -86,21 +68,18 @@ function HubCard({
       )}
 
       <div className="flex items-start gap-4">
-        {/* الأيقونة */}
         <div
           className={`flex-shrink-0 w-14 h-14 rounded-lg flex items-center justify-center transition-colors ${colorClasses[color]}`}
         >
           <Icon size={28} />
         </div>
 
-        {/* النصوص */}
         <div className="flex-1 min-w-0">
           <h3 className="text-lg font-bold text-neutral-900 mb-1">{title}</h3>
           <p className="text-sm text-neutral-600 leading-relaxed">{description}</p>
         </div>
       </div>
 
-      {/* سهم الانتقال */}
       <div className="mt-4 flex items-center text-primary-700 text-sm font-medium">
         <span>فتح</span>
         <ChevronLeft
@@ -116,9 +95,6 @@ function HubCard({
 // 2. بطاقة الإحصاءات السريعة (KPI Card)
 // ═══════════════════════════════════════════════
 
-/**
- * بطاقة إحصائية صغيرة (للـ Top KPIs).
- */
 function KpiCard({ icon: Icon, label, value, color = 'primary', suffix = '' }) {
   const colorClasses = {
     primary: 'text-primary-700 bg-primary-50',
@@ -150,19 +126,17 @@ function KpiCard({ icon: Icon, label, value, color = 'primary', suffix = '' }) {
 function SalesPage() {
   const { isAdmin, isAccountant, isSalesRep, isStorekeeper } = useAuth();
 
-  // الإحصاءات (تُقرأ من الـ Contexts — بدون جلب)
   const { stats: invoiceStats } = useInvoices();
-  const { stats: deliveryStats } = useDeliveryNotes();
+  // ⚠️ 🅱: حُذف deliveryStats
   const { stats: returnStats } = useCustomerReturns();
 
-  // الصلاحيات
   const canViewInvoices = isAdmin || isAccountant || isSalesRep;
-  const canViewDeliveryNotes = isAdmin || isAccountant || isSalesRep;
+  // ⚠️ 🅱: حُذف canViewDeliveryNotes
   const canViewCustomerReturns = isAdmin || isAccountant || isSalesRep;
   const canViewPurchases = isAdmin || isAccountant || isStorekeeper;
 
-  // عدد المشكلات (للإبراز)
-  const totalAlerts = (invoiceStats?.overdue || 0) + (deliveryStats?.pending || 0) + (returnStats?.pending || 0);
+  // ⚠️ 🅱: حُذف deliveryStats.pending
+  const totalAlerts = (invoiceStats?.overdue || 0) + (returnStats?.pending || 0);
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
@@ -171,7 +145,7 @@ function SalesPage() {
         <div>
           <h1 className="text-2xl font-bold text-neutral-900">المبيعات</h1>
           <p className="text-sm text-neutral-600 mt-1">
-            إدارة الفواتير، إيصالات التسليم، والمرتجعات
+            إدارة الفواتير والمرتجعات
           </p>
         </div>
         {totalAlerts > 0 && (
@@ -230,17 +204,7 @@ function SalesPage() {
             />
           )}
 
-          {canViewDeliveryNotes && (
-            <HubCard
-              to="/sales/delivery-notes"
-              icon={Truck}
-              title="إيصالات التسليم"
-              description="تسجيل خروج البضاعة من المخزن إلى الصيدليات مع توقيع المستلم."
-              color="info"
-              badge={deliveryStats?.pending}
-              badgeColor="warning"
-            />
-          )}
+          {/* ⚠️ 🅱: حُذف HubCard "إيصالات التسليم" */}
 
           {canViewCustomerReturns && (
             <HubCard
@@ -256,7 +220,7 @@ function SalesPage() {
         </div>
       </div>
 
-      {/* ═══ قسم المشتريات (البطاقات) ═══ */}
+      {/* ═══ قسم المشتريات ═══ */}
       {canViewPurchases && (
         <div>
           <h2 className="text-lg font-bold text-neutral-900 mb-3">المشتريات والموردون</h2>
@@ -280,7 +244,7 @@ function SalesPage() {
         </div>
       )}
 
-      {/* ═══ حالة فارغة (إن لم يكن لديه أي صلاحية) ═══ */}
+      {/* ═══ حالة فارغة ═══ */}
       {!canViewInvoices && !canViewPurchases && (
         <Card>
           <div className="text-center py-8">

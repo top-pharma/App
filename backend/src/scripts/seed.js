@@ -2,6 +2,10 @@
  * @file seed.js
  * @description
  * سكربت التهيئة الأساسي — Phase 2.5.
+ *
+ * ✅ 🅲 (2026-11-08):
+ * - حُذف sales.prefixes.check + finance.checkReminderDays من Settings.create().
+ * - Check أُلغي.
  */
 
 import { connectDatabase, disconnectDatabase } from '../config/database.js';
@@ -198,7 +202,7 @@ async function seedSettings() {
         supplierReturn: 'SRET',
         cashTransaction: 'CT',
         salesRepTransaction: 'SRT',
-        check: 'CHK',
+        // ⚠️ 🅲: حُذف check: 'CHK'
       },
       defaultTaxRate: 0,
       returnGracePeriodDays: 7,
@@ -216,7 +220,7 @@ async function seedSettings() {
       reorderWarningEnabled: true,
     },
     finance: {
-      checkReminderDays: 3,
+      // ⚠️ 🅲: حُذف checkReminderDays: 3
       invoiceReminderDays: 3,
       remindersEnabled: true,
     },

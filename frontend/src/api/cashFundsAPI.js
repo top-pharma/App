@@ -1,93 +1,68 @@
 /**
- * cashFundsAPI.js
+ * @file cashFundsAPI.js
+ * @description دوال API لصناديق النقدية — Phase A.8.
  *
- * طبقة الاتصال بـ API صناديق النقدية.
+ * ⚠️ Phase A.8: getCashFunds → normalizeListWithId (يُعيد { items, pagination }).
+ *    CashFundsContext يجب أن يقرأ result.items (أو result.data fallback).
  */
 
 import axiosInstance from './axiosInstance.js';
+import { normalizeListWithId, withId } from './_helpers.js';
 
-/**
- * جلب قائمة الصناديق.
- * @param {Object} [params] - { page, limit, search, isActive, sortBy, sortOrder }
- * @returns {Promise<Object>} { data, pagination }
- */
-export const getCashFunds = async (params = {}) => {
+// ═══════════════════════════════════════════════
+// 1. القراءة
+// ═══════════════════════════════════════════════
+
+export async function getCashFunds(params = {}) {
   const { data } = await axiosInstance.get('/cash-funds', { params });
-  return data;
-};
+  return normalizeListWithId(data);
+}
 
-/**
- * جلب صندوق واحد.
- * @param {string} id
- * @returns {Promise<Object>}
- */
-export const getCashFund = async (id) => {
+export async function getCashFund(id) {
   const { data } = await axiosInstance.get(`/cash-funds/${id}`);
-  return data.data;
-};
+  return withId(data.data);
+}
 
-/**
- * إنشاء صندوق.
- * @param {Object} payload
- * @returns {Promise<Object>}
- */
-export const createCashFund = async (payload) => {
+// ═══════════════════════════════════════════════
+// 2. الإنشاء / التعديل / الحذف
+// ═══════════════════════════════════════════════
+
+export async function createCashFund(payload) {
   const { data } = await axiosInstance.post('/cash-funds', payload);
-  return data.data;
-};
+  return withId(data.data);
+}
 
-/**
- * تحديث صندوق.
- * @param {string} id
- * @param {Object} payload
- * @returns {Promise<Object>}
- */
-export const updateCashFund = async (id, payload) => {
+export async function updateCashFund(id, payload) {
   const { data } = await axiosInstance.patch(`/cash-funds/${id}`, payload);
-  return data.data;
-};
+  return withId(data.data);
+}
 
-/**
- * حذف صندوق (soft delete).
- * @param {string} id
- * @returns {Promise<Object>}
- */
-export const deleteCashFund = async (id) => {
+export async function deleteCashFund(id) {
   const { data } = await axiosInstance.delete(`/cash-funds/${id}`);
   return data;
-};
+}
 
-/**
- * تعيين الصندوق كافتراضي.
- * @param {string} id
- * @returns {Promise<Object>}
- */
-export const setDefaultCashFund = async (id) => {
+// ═══════════════════════════════════════════════
+// 3. تعيين افتراضي / حركات
+// ═══════════════════════════════════════════════
+
+export async function setDefaultCashFund(id) {
   const { data } = await axiosInstance.post(`/cash-funds/${id}/set-default`);
-  return data.data;
-};
+  return withId(data.data);
+}
 
-/**
- * إيداع/سحب نقدي يدوي.
- * @param {string} id
- * @param {Object} payload - { type, amount, description, referenceType, date }
- * @returns {Promise<Object>}
- */
-export const cashFundMovement = async (id, payload) => {
+export async function cashFundMovement(id, payload) {
   const { data } = await axiosInstance.post(`/cash-funds/${id}/movement`, payload);
   return data.data;
-};
+}
 
-/**
- * حركات صندوق محدد.
- * @param {string} id
- * @param {Object} [params]
- * @returns {Promise<Object>}
- */
-export const getFundTransactions = async (id, params = {}) => {
-  const { data } = await axiosInstance.get(`/cash-funds/${id}/transactions`, { params });
-  return data;
-};
+export async function getFundTransactions(id, params = {}) {
+  const { data } = await axiosInstance.get(
+    `/cash-funds/${id}/transactions`,
+    { params }
+  );
+  return normalizeListWithId(data);
+}
 
 export default {
   getCashFunds,

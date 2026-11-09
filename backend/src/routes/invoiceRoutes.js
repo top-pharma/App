@@ -6,6 +6,10 @@
  * - /my-invoices قبل /:id
  * - /draft قبل /:id
  * - /:id/finalize و /:id/draft بعد /:id
+ *
+ * ✅ 🅳 (2026-11-09) — P2:
+ * - invoices.read → invoices.view (3 مواضع: /, /my-invoices, /:id)
+ * - السبب: ALL_PERMISSIONS لا يحتوي invoices.read (فقط invoices.view).
  */
 
 import express from 'express';
@@ -55,11 +59,12 @@ router.use(requireAuth);
 
 // ============================================================
 // 1) القراءة
+// ✅ 🅳 (P2): invoices.view بدل invoices.read
 // ============================================================
 
 router.get(
   '/',
-  requirePermissions('invoices.read'),
+  requirePermissions('invoices.view'),    // ✅ 🅳 (P2)
   scopeSalesRepToOwnCustomers,
   validateQuery(listInvoicesQuerySchema),
   listInvoices
@@ -68,7 +73,7 @@ router.get(
 // ⚠️ قبل /:id
 router.get(
   '/my-invoices',
-  requirePermissions('invoices.read'),
+  requirePermissions('invoices.view'),    // ✅ 🅳 (P2)
   scopePharmacyToOwnData,
   validateQuery(listInvoicesQuerySchema),
   getMyInvoices
@@ -76,7 +81,7 @@ router.get(
 
 router.get(
   '/:id',
-  requirePermissions('invoices.read'),
+  requirePermissions('invoices.view'),    // ✅ 🅳 (P2)
   validateParams(invoiceIdParamsSchema),
   scopeSalesRepToOwnCustomers,
   scopePharmacyToOwnData,
@@ -87,10 +92,6 @@ router.get(
 // 2) الإنشاء (فاتورة نهائية أو مسودة)
 // ============================================================
 
-/**
- * POST /api/invoices
- * فاتورة نهائية مباشرة (توافق Phase 2).
- */
 router.post(
   '/',
   requirePermissions('invoices.create'),
@@ -103,11 +104,6 @@ router.post(
   createInvoice
 );
 
-/**
- * POST /api/invoices/draft
- * Phase 2.5 — إنشاء مسودة (لا تأثير).
- * ⚠️ قبل /:id
- */
 router.post(
   '/draft',
   requirePermissions('invoices.create'),
@@ -124,9 +120,6 @@ router.post(
 // 3) التعديل
 // ============================================================
 
-/**
- * PATCH /api/invoices/:id/draft — تعديل مسودة (يسمح بتعديل البنود).
- */
 router.patch(
   '/:id/draft',
   requirePermissions('invoices.update'),
@@ -140,9 +133,6 @@ router.patch(
   updateDraft
 );
 
-/**
- * PATCH /api/invoices/:id — تعديل بيانات وصفية فقط (نهائية).
- */
 router.patch(
   '/:id',
   requirePermissions('invoices.update'),
@@ -160,12 +150,9 @@ router.patch(
 // 4) الإجراءات
 // ============================================================
 
-/**
- * POST /api/invoices/:id/finalize — اعتماد مسودة.
- */
 router.post(
   '/:id/finalize',
-  requirePermissions('invoices.create'), // نفس صلاحية الإنشاء
+  requirePermissions('invoices.create'),  // نفس صلاحية الإنشاء
   validateParams(invoiceIdParamsSchema),
   validateBody(finalizeInvoiceSchema),
   auditAction({
@@ -176,9 +163,6 @@ router.post(
   finalizeInvoice
 );
 
-/**
- * PATCH /api/invoices/:id/cancel
- */
 router.patch(
   '/:id/cancel',
   requirePermissions('invoices.cancel'),
@@ -192,9 +176,6 @@ router.patch(
   cancelInvoice
 );
 
-/**
- * POST /api/invoices/:id/payments
- */
 router.post(
   '/:id/payments',
   requirePermissions('invoices.update'),

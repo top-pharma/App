@@ -3,13 +3,11 @@
  * @description
  * فحص الصلاحيات الدقيقة (RBAC) اعتماداً على Role.permissions في قاعدة البيانات.
  *
- * لماذا هذا الملف؟
- * - متطلب صريح: "التحقق في Backend وليس الواجهة فقط".
- * - نتحقق من الصلاحيات الفعلية من قاعدة البيانات (لا نثق بـ role وحده)،
- *   فلو غيّر الأدمن صلاحيات دور، يُطبَّق فوراً.
- * - نُخزّن صلاحيات الدور في req.rolePermissions لتفادي استعلامات متكررة.
- * - نُسجّل محاولات الرفض في AuditLog (عبر auditLogMiddleware اختيارياً).
- * - لا نفترض أن req.user موجود: نتحقق أولاً ونرمي 401 إن لزم.
+ * ✅ 🅳 (2026-11-09) — P1:
+ * - getRolePermissions: Role.findOne({ code: roleName }) بدل { name, isActive }
+ * - السبب: Role لا يحتوي isActive (بعد 🅱/🅲)، و roleName = code (مثل 'admin')
+ *   وليس name العربي (مثل 'مدير').
+ * - الأثر: sales_rep / accountant / pharmacy كانوا يحصلون على permissions=[] → 403 على كل شيء.
  */
 
 import { Role } from '../models/Role.js';
@@ -18,9 +16,6 @@ import { logger } from '../utils/logger.js';
 
 /**
  * بناء استجابة رفض موحّدة.
- * @param {import('express').Response} res
- * @param {string} message
- * @returns {import('express').Response}
  */
 const respondForbidden = (res, message) =>
   res.status(403).json({
@@ -28,26 +23,15 @@ const respondForbidden = (res, message) =>
     error: { code: 'PERMISSION_DENIED', message },
   });
 
-/**
- * جلب صلاحيات الدور (مع cache بسيط في الذاكرة لمدة قصيرة).
- * الهدف: تقليل استعلامات قاعدة البيانات على المسارات الساخنة.
- *
- * ملاحظة: cache داخلي فقط. أي تعديل على Role عبر الـ API يجب أن يُفرِّغ
- * هذا الـ cache (نستدعي clearRoleCache عند تحديث الأدوار).
- */
-
 /** @type {Map<string, { permissions: string[], expiresAt: number }>} */
 const roleCache = new Map();
 
-/**
- * مدة صلاحية الـ cache بالمللي ثانية (60 ثانية).
- * قصيرة كفاية لتعكس التغييرات سريعاً، وطويلة كفاية لتقليل الاستعلامات.
- */
+/** مدة صلاحية الـ cache بالمللي ثانية (60 ثانية). */
 const CACHE_TTL_MS = 60 * 1000;
 
 /**
  * إفراغ الـ cache (كلياً أو لدور واحد).
- * @param {string} [roleName]
+ * @param {string} [roleName] — code الدور (مثل 'admin')
  */
 export const clearRoleCache = (roleName) => {
   if (roleName) {
@@ -60,6 +44,10 @@ export const clearRoleCache = (roleName) => {
 /**
  * إرجاع صلاحيات الدور (من cache أو قاعدة البيانات).
  *
+ * ✅ 🅳 (P1): نستخدم `code` بدل `name` + `isActive`.
+ * - `roleName` هنا = `req.user.role` = code الدور (مثل 'sales_rep').
+ * - `Role.js` بعد 🅱/🅲 لا يحتوي `isActive` — لا نستخدمه.
+ *
  * @async
  * @param {string} roleName
  * @returns {Promise<string[]>}
@@ -71,9 +59,8 @@ const getRolePermissions = async (roleName) => {
     return cached.permissions;
   }
 
-  const role = await Role.findOne({ name: roleName, isActive: true }).select(
-    'permissions'
-  );
+  // ✅ 🅳: `{ code }` بدل `{ name, isActive }`
+  const role = await Role.findOne({ code: roleName }).select('permissions');
 
   const permissions = role ? role.permissions || [] : [];
 
@@ -100,7 +87,7 @@ export const requirePermissions = (...requiredPermissions) => async (req, res, n
       });
     }
 
-    // Admin يملك كل الصلاحيات ضمناً (حماية من أخطاء إعدادات).
+    // Admin يملك كل الصلاحيات ضمناً.
     if (req.user.role === 'admin') {
       req.rolePermissions = ['*'];
       return next();
@@ -188,9 +175,6 @@ export const requireAllPermissions = (permissions) =>
 
 /**
  * Middleware: يضمن أن المندوب لا يرى إلا موارد صيدلياته.
- * نستخدمه لاحقاً في controllers العملاء/الفواتير.
- * يضع req.scope = { salesRepId } ليستعمله الـ controller في الفلترة.
- *
  * @type {import('express').RequestHandler}
  */
 export const scopeSalesRepToOwnCustomers = (req, res, next) => {
@@ -230,7 +214,6 @@ export const scopePharmacyToOwnData = (req, res, next) => {
 
 /**
  * هل يملك المستخدم الحالي الصلاحية (بدون middleware)؟
- * مفيد داخل controllers لتفريعات شرطية.
  *
  * @param {import('express').Request} req
  * @param {string} permission

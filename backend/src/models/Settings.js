@@ -57,13 +57,11 @@ const settingsSchema = new Schema(
     sales: {
       prefixes: {
         invoice: { type: String, default: 'INV', trim: true },
-        deliveryNote: { type: String, default: 'DN', trim: true },
         customerReturn: { type: String, default: 'RET', trim: true },
         purchaseReceipt: { type: String, default: 'PR', trim: true },
         supplierReturn: { type: String, default: 'SRET', trim: true },
         cashTransaction: { type: String, default: 'CT', trim: true },
         salesRepTransaction: { type: String, default: 'SRT', trim: true },
-        check: { type: String, default: 'CHK', trim: true },
       },
 
       defaultTaxRate: { type: Number, default: 0, min: 0, max: 100 },
@@ -136,7 +134,6 @@ const settingsSchema = new Schema(
 
     // ─── 5. المالية ───
     finance: {
-      checkReminderDays: { type: Number, default: 3, min: 0, max: 30 },
       invoiceReminderDays: { type: Number, default: 3, min: 0, max: 30 },
       remindersEnabled: { type: Boolean, default: true },
     },

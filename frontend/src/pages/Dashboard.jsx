@@ -3,16 +3,14 @@
  * @description
  * لوحة التحكم الرئيسية.
  *
- * يستخدم الإحصاءات المخزّنة في الـ Contexts (بدون جلب إضافي).
- * يوجّه المستخدم للأقسام حسب دوره.
- *
- * ✅ Phase 4: إضافة بطاقة "مركز التقارير" في الوصول السريع.
+ * ✅ 🅱 (2026-11-08):
+ * - حذف `useDeliveryNotes` + StatCard "إيصالات معلقة" + QuickLink "إيصالات التسليم".
  */
 
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   FileText,
-  Truck,
+  // ⚠️ 🅱: حُذف Truck
   Undo2,
   Receipt,
   ArrowLeftRight,
@@ -23,15 +21,17 @@ import {
   Boxes,
   BarChart3,
   Wallet,
+  Plus,
 } from 'lucide-react';
 
 import { useAuth } from '../hooks/useAuth.js';
 import { useInvoices } from '../hooks/useInvoices.js';
-import { useDeliveryNotes } from '../hooks/useDeliveryNotes.js';
+// ⚠️ 🅱: حُذف useDeliveryNotes
 import { useCustomerReturns } from '../hooks/useCustomerReturns.js';
 import { useStock } from '../hooks/useStock.js';
 
 import Card from '../components/UI/Card.jsx';
+import Button from '../components/UI/Button.jsx';
 import { formatNumber } from '../utils/formatters.js';
 
 // ═══════════════════════════════════════════════
@@ -99,9 +99,10 @@ function QuickLink({ to, icon: Icon, title, description, color = 'primary' }) {
 
 function Dashboard() {
   const { user, userName, isAdmin, isAccountant, isSalesRep, isStorekeeper } = useAuth();
+  const navigate = useNavigate();
 
   const { stats: invoiceStats } = useInvoices();
-  const { stats: deliveryStats } = useDeliveryNotes();
+  // ⚠️ 🅱: حُذف deliveryStats
   const { stats: returnStats } = useCustomerReturns();
   const { expiringSoon, belowReorder } = useStock();
 
@@ -109,22 +110,38 @@ function Dashboard() {
   const canSeeSales = isAdmin || isAccountant || isSalesRep;
   const canSeeReports = isAdmin || isAccountant;
 
+  const handleGoToCreateInvoice = () => {
+    navigate('/sales/invoices', { state: { openCreateForm: true } });
+  };
+
   return (
     <div className="space-y-6">
-      {/* ═══ الترحيب ═══ */}
-      <div>
-        <h1 className="text-2xl font-bold text-neutral-900">
-          مرحباً {userName?.split(' ')[0] || 'بك'}
-        </h1>
-        <p className="text-sm text-neutral-600 mt-1">
-          نظرة سريعة على حالة النظام — {new Date().toLocaleDateString('en-GB')}
-        </p>
+      {/* ═══ الترحيب + زر إنشاء فاتورة ═══ */}
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-neutral-900">
+            مرحباً {userName?.split(' ')[0] || 'بك'}
+          </h1>
+          <p className="text-sm text-neutral-600 mt-1">
+            نظرة سريعة على حالة النظام — {new Date().toLocaleDateString('en-GB')}
+          </p>
+        </div>
+
+        {(isAdmin || isAccountant) && (
+          <Button
+            variant="primary"
+            icon={Plus}
+            onClick={handleGoToCreateInvoice}
+          >
+            إنشاء فاتورة
+          </Button>
+        )}
       </div>
 
       {/* ═══ KPIs الرئيسية ═══ */}
       <div>
         <h2 className="text-lg font-bold text-neutral-900 mb-3">المؤشرات الرئيسية</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           <StatCard
             icon={FileText}
             label="إجمالي الفواتير"
@@ -146,13 +163,7 @@ function Dashboard() {
             color="warning"
             to={canSeeSales ? '/sales/customer-returns' : undefined}
           />
-          <StatCard
-            icon={Truck}
-            label="إيصالات معلقة"
-            value={deliveryStats?.pending || 0}
-            color="info"
-            to={canSeeSales ? '/sales/delivery-notes' : undefined}
-          />
+          {/* ⚠️ 🅱: حُذف StatCard "إيصالات معلقة" */}
         </div>
       </div>
 
@@ -247,13 +258,7 @@ function Dashboard() {
                 description="إنشاء ومتابعة الفواتير"
                 color="primary"
               />
-              <QuickLink
-                to="/sales/delivery-notes"
-                icon={Truck}
-                title="إيصالات التسليم"
-                description="تسجيل خروج البضاعة"
-                color="info"
-              />
+              {/* ⚠️ 🅱: حُذف QuickLink "إيصالات التسليم" */}
               <QuickLink
                 to="/sales/customer-returns"
                 icon={Undo2}

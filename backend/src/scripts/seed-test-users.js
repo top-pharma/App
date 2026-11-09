@@ -1,7 +1,12 @@
 /**
  * @file seed-test-users.js
  * @description
- * إنشاء مستخدمين اختبار لأدوار النظام الخمسة (بخلاف admin).
+ * إنشاء مستخدمين اختبار لأدوار النظام (بخلاف admin).
+ *
+ * ⚠️ تحديث 2026-11-05:
+ * - إصلاح N26: Role.findOne({ code }) بدل { name, isActive }
+ *   (Role.name هو label عربي، وليس code — Role لا يحتوي isActive)
+ * - يستخدم code = USER_ROLES.* (lowercase) للتحقق من الدور.
  *
  * ⚠️ تحديث 2026-10-19:
  * - 4 مناديب مبيعات بأسماء عربية واقعية (بدل مندوب واحد).
@@ -105,25 +110,31 @@ const TEST_USERS = Object.freeze([
 
 /**
  * إنشاء/تحديث المستخدمين الاختبار.
+ *
+ * ⚠️ إصلاح N26: نتحقق من الدور باستخدام `code` (lowercase) وليس `name` (label عربي).
+ *    - Role.code = USER_ROLES.* (مثل 'storekeeper')
+ *    - Role.name = label عربي (مثل 'أمين مخزن')
+ *    - Role لا يحتوي isActive — لا نستخدمه في الاستعلام.
+ *
  * @returns {Promise<void>}
  */
 const seedTestUsers = async () => {
   logger.info('👥 زرع المستخدمين الاختبار...');
 
   for (const userData of TEST_USERS) {
-    // التحقق من وجود الدور
-    const roleExists = await Role.findOne({
-      name: userData.role,
-      isActive: true,
-    })
+    // ─── التحقق من وجود الدور (بـ code — وليس name) ───
+    const roleExists = await Role.findOne({ code: userData.role })
       .select('_id')
       .lean();
 
     if (!roleExists) {
-      logger.error(`   ❌ الدور "${userData.role}" غير موجود. شغّل: npm run seed`);
+      logger.error(
+        `   ❌ الدور "${userData.role}" غير موجود. شغّل: npm run seed`
+      );
       throw new Error(`الدور ${userData.role} غير موجود.`);
     }
 
+    // ─── البحث عن المستخدم الموجود ───
     const existing = await User.findOne({ email: userData.email });
 
     if (existing) {
@@ -136,7 +147,8 @@ const seedTestUsers = async () => {
       existing.mustChangePassword = false;
       // نُبقي linkedEntity كما هو للمندوبين (إن كان مربوطاً)
       if (userData.role === USER_ROLES.PHARMACY) {
-        existing.linkedEntity = userData.linkedEntity || { type: null, id: null };
+        existing.linkedEntity =
+          userData.linkedEntity || { type: null, id: null };
       }
       existing.notes = userData.notes || '';
       existing.resetLoginAttempts();
@@ -162,20 +174,48 @@ const seedTestUsers = async () => {
 
   // ─── جدول بيانات الدخول ───
   logger.info('');
-  logger.info('   ┌────────────────────────────────────────────────────────────────────┐');
-  logger.info('   │  🔑 بيانات الدخول للاختبار                                          │');
-  logger.info('   ├────────────────────────────────────────────────────────────────────┤');
-  logger.info('   │  الدور        │ البريد                    │ كلمة المرور           │');
-  logger.info('   ├────────────────────────────────────────────────────────────────────┤');
-  logger.info('   │  admin        │ admin@pharma-system.local │ Admin@123456          │');
-  logger.info('   │  storekeeper  │ store@pharma.local        │ Store@123             │');
-  logger.info('   │  accountant   │ account@pharma.local      │ Account@123           │');
-  logger.info('   │  pharmacy     │ pharmacy@pharma.local     │ Pharma@123            │');
-  logger.info('   │  sales_rep 1  │ rep@pharma.local          │ Rep@123456            │');
-  logger.info('   │  sales_rep 2  │ rep2@pharma.local         │ Rep@123456            │');
-  logger.info('   │  sales_rep 3  │ rep3@pharma.local         │ Rep@123456            │');
-  logger.info('   │  sales_rep 4  │ rep4@pharma.local         │ Rep@123456            │');
-  logger.info('   └────────────────────────────────────────────────────────────────────┘');
+  logger.info(
+    '   ┌────────────────────────────────────────────────────────────────────┐'
+  );
+  logger.info(
+    '   │  🔑 بيانات الدخول للاختبار                                          │'
+  );
+  logger.info(
+    '   ├────────────────────────────────────────────────────────────────────┤'
+  );
+  logger.info(
+    '   │  الدور        │ البريد                    │ كلمة المرور           │'
+  );
+  logger.info(
+    '   ├────────────────────────────────────────────────────────────────────┤'
+  );
+  logger.info(
+    '   │  admin        │ admin@pharma-system.local │ Admin@123456          │'
+  );
+  logger.info(
+    '   │  storekeeper  │ store@pharma.local        │ Store@123             │'
+  );
+  logger.info(
+    '   │  accountant   │ account@pharma.local      │ Account@123           │'
+  );
+  logger.info(
+    '   │  pharmacy     │ pharmacy@pharma.local     │ Pharma@123            │'
+  );
+  logger.info(
+    '   │  sales_rep 1  │ rep@pharma.local          │ Rep@123456            │'
+  );
+  logger.info(
+    '   │  sales_rep 2  │ rep2@pharma.local         │ Rep@123456            │'
+  );
+  logger.info(
+    '   │  sales_rep 3  │ rep3@pharma.local         │ Rep@123456            │'
+  );
+  logger.info(
+    '   │  sales_rep 4  │ rep4@pharma.local         │ Rep@123456            │'
+  );
+  logger.info(
+    '   └────────────────────────────────────────────────────────────────────┘'
+  );
 };
 
 // ============================================================

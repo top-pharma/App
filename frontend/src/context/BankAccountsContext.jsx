@@ -2,6 +2,14 @@
  * BankAccountsContext.jsx
  *
  * Context لإدارة الحسابات البنكية.
+ *
+ * ⚠️ Phase A (2026-11-07): إصلاح showToast
+ * - success/error بدل showToast.
+ *
+ * ⚠️ Phase A.8 (2026-11-07): إصلاح fetchAccounts
+ * - bankAccountsAPI.getBankAccounts الآن يعيد { items, pagination }.
+ * - fetchAccounts يقرأ result.items (وليس result.data).
+ * - fallback: result.data (للتوافق مع أي API قديم).
  */
 
 import { createContext, useState, useEffect, useCallback, useMemo, useContext } from 'react';
@@ -13,27 +21,46 @@ const BankAccountsContext = createContext(null);
 
 export const BankAccountsProvider = ({ children }) => {
   const { user } = useAuth();
-  const { showToast } = useToast();
+  const { success, error: showError } = useToast();
 
   const [accounts, setAccounts] = useState([]);
   const [activeAccount, setActiveAccount] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchAccounts = useCallback(async (params = {}) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await bankAccountsAPI.getBankAccounts({ limit: 100, ...params });
-      setAccounts(result.data || []);
-      const active = (result.data || []).find((a) => a.isActive);
-      setActiveAccount(active || null);
-    } catch (err) {
-      setError(err.response?.data?.message || 'فشل جلب الحسابات البنكية');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  /**
+   * جلب الحسابات البنكية.
+   * ⚠️ Phase A.8: result = { items, pagination } (من normalizeListWithId).
+   */
+  const fetchAccounts = useCallback(
+    async (params = {}) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await bankAccountsAPI.getBankAccounts({ limit: 100, ...params });
+        // ⚠️ Phase A.8: result.items (مع fallback لـ result.data)
+        const list =
+          (Array.isArray(result?.items) ? result.items : null) ||
+          (Array.isArray(result?.data) ? result.data : null) ||
+          [];
+        setAccounts(list);
+        const active = list.find((a) => a.isActive);
+        setActiveAccount(active || null);
+      } catch (err) {
+        const msg =
+          err?.error?.message ||
+          err?.response?.data?.error?.message ||
+          err?.response?.data?.message ||
+          err?.message ||
+          'فشل جلب الحسابات البنكية';
+        setError(msg);
+        showError(msg);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [showError]
+  );
 
   useEffect(() => {
     if (user) fetchAccounts();
@@ -41,31 +68,61 @@ export const BankAccountsProvider = ({ children }) => {
 
   const createAccount = useCallback(
     async (payload) => {
-      const created = await bankAccountsAPI.createBankAccount(payload);
-      await fetchAccounts();
-      showToast('تم إنشاء الحساب البنكي', 'success');
-      return created;
+      try {
+        const created = await bankAccountsAPI.createBankAccount(payload);
+        await fetchAccounts();
+        success('تم إنشاء الحساب البنكي');
+        return created;
+      } catch (err) {
+        const msg =
+          err?.error?.message ||
+          err?.response?.data?.error?.message ||
+          err?.message ||
+          'فشل إنشاء الحساب البنكي';
+        showError(msg);
+        throw err;
+      }
     },
-    [fetchAccounts, showToast]
+    [fetchAccounts, success, showError]
   );
 
   const updateAccount = useCallback(
     async (id, payload) => {
-      const updated = await bankAccountsAPI.updateBankAccount(id, payload);
-      await fetchAccounts();
-      showToast('تم تحديث الحساب البنكي', 'success');
-      return updated;
+      try {
+        const updated = await bankAccountsAPI.updateBankAccount(id, payload);
+        await fetchAccounts();
+        success('تم تحديث الحساب البنكي');
+        return updated;
+      } catch (err) {
+        const msg =
+          err?.error?.message ||
+          err?.response?.data?.error?.message ||
+          err?.message ||
+          'فشل تحديث الحساب البنكي';
+        showError(msg);
+        throw err;
+      }
     },
-    [fetchAccounts, showToast]
+    [fetchAccounts, success, showError]
   );
 
   const deleteAccount = useCallback(
     async (id) => {
-      await bankAccountsAPI.deleteBankAccount(id);
-      await fetchAccounts();
-      showToast('تم تعطيل الحساب البنكي', 'success');
+      try {
+        await bankAccountsAPI.deleteBankAccount(id);
+        await fetchAccounts();
+        success('تم تعطيل الحساب البنكي');
+      } catch (err) {
+        const msg =
+          err?.error?.message ||
+          err?.response?.data?.error?.message ||
+          err?.message ||
+          'فشل تعطيل الحساب البنكي';
+        showError(msg);
+        throw err;
+      }
     },
-    [fetchAccounts, showToast]
+    [fetchAccounts, success, showError]
   );
 
   const value = useMemo(
@@ -79,10 +136,23 @@ export const BankAccountsProvider = ({ children }) => {
       updateAccount,
       deleteAccount,
     }),
-    [accounts, activeAccount, loading, error, fetchAccounts, createAccount, updateAccount, deleteAccount]
+    [
+      accounts,
+      activeAccount,
+      loading,
+      error,
+      fetchAccounts,
+      createAccount,
+      updateAccount,
+      deleteAccount,
+    ]
   );
 
-  return <BankAccountsContext.Provider value={value}>{children}</BankAccountsContext.Provider>;
+  return (
+    <BankAccountsContext.Provider value={value}>
+      {children}
+    </BankAccountsContext.Provider>
+  );
 };
 
 export const useBankAccountsContext = () => {

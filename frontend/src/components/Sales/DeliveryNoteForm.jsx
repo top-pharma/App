@@ -394,7 +394,7 @@ function DeliveryNoteForm({ onSuccess, onCancel }) {
           <div className="space-y-3">
             <Input label="المبلغ المقبوض الآن" type="number"
               value={initialAmount} onChange={(e) => setInitialAmount(e.target.value)}
-              min="0" max={totalAmount} step="0.01" />
+              min="0" max={totalAmount} step="any" />
 
             {initialPaymentAmount > 0 && (
               <>

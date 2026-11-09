@@ -3,12 +3,14 @@
  * @description
  * سكربت اختبار يدوي لكل Jobs (بدون انتظار Cron).
  *
- * Jobs المُختبَرة:
+ * ✅ 🅲 (2026-11-08):
+ * - حُذف checkDueAlert (Check أُلغي).
+ *
+ * Jobs المُختبَرة (بعد 🅲):
  *  - expiry       → expiryAlert
  *  - reorder      → reorderAlert
  *  - invoices     → invoiceDueAlert
- *  - checks       → checkDueAlert (Phase 5)
- *  - backup       → autoBackup (Phase 5.5)
+ *  - backup       → autoBackup
  */
 
 import { connectDatabase, disconnectDatabase } from '../config/database.js';
@@ -17,14 +19,14 @@ import { logger } from '../utils/logger.js';
 import { runExpiryAlert } from '../jobs/expiryAlert.js';
 import { runReorderAlert } from '../jobs/reorderAlert.js';
 import { runInvoiceDueAlert } from '../jobs/invoiceDueAlert.js';
-import runCheckDueAlert from '../jobs/checkDueAlert.js';
+// ⚠️ 🅲: حُذف import runCheckDueAlert
 import { runAutoBackup } from '../jobs/autoBackup.js';
 
 const JOBS = {
   expiry: { name: 'expiryAlert', fn: runExpiryAlert, icon: '🔔' },
   reorder: { name: 'reorderAlert', fn: runReorderAlert, icon: '📦' },
   invoices: { name: 'invoiceDueAlert', fn: runInvoiceDueAlert, icon: '💰' },
-  checks: { name: 'checkDueAlert', fn: runCheckDueAlert, icon: '📋' },
+  // ⚠️ 🅲: حُذف checks: { name: 'checkDueAlert', fn: runCheckDueAlert, icon: '📋' }
   backup: { name: 'autoBackup', fn: runAutoBackup, icon: '💾' },
 };
 

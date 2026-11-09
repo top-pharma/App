@@ -3,11 +3,11 @@
  * @description
  * دوال مساعدة مشتركة بين كل التقارير.
  *
- * لماذا هذا الملف؟
- * - يمنع تكرار الكود في 5 controllers.
- * - يوحّد طريقة التعامل مع التواريخ (from/to) والأرقام.
- * - يوفر تسميات عربية للحسابات والأنواع (لا magic strings).
- * - يعالج scope (المندوب يرى بياناته فقط، الصيدلية ترى فواتيرها فقط).
+ * ✅ 🅲 (2026-11-08):
+ * - حُذف CHECK_STATUS + CHECK_TYPES من imports (من constants.js).
+ * - حُذفت 5 أسطر CHECK_* من ENTRY_TYPE_LABELS.
+ * - حُذف CHECK_STATUS_LABELS (كائن كامل).
+ * - حُذف CHECK_TYPE_LABELS (كائن كامل).
  */
 
 import mongoose from 'mongoose';
@@ -15,8 +15,8 @@ import mongoose from 'mongoose';
 import {
   ACCOUNTING_ENTRY_TYPES,
   INVOICE_STATUS,
-  CHECK_STATUS,
-  CHECK_TYPES,
+  // ⚠️ 🅲: حُذف CHECK_STATUS
+  // ⚠️ 🅲: حُذف CHECK_TYPES
   PAYMENT_TYPES,
 } from '../utils/constants.js';
 import { AppError } from '../middlewares/errorMiddleware.js';
@@ -25,11 +25,6 @@ import { AppError } from '../middlewares/errorMiddleware.js';
  * 1) تقريب آمن
  * ───────────────────────────────────────────────────────────── */
 
-/**
- * تقريب آمن لخانتين عشريتين.
- * @param {number} n
- * @returns {number}
- */
 export function round2(n) {
   if (!Number.isFinite(n)) return 0;
   return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
@@ -39,33 +34,18 @@ export function round2(n) {
  * 2) التواريخ
  * ───────────────────────────────────────────────────────────── */
 
-/**
- * بداية اليوم (00:00:00.000).
- * @param {Date|string} date
- * @returns {Date}
- */
 export function startOfDay(date) {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
   return d;
 }
 
-/**
- * نهاية اليوم (23:59:59.999).
- * @param {Date|string} date
- * @returns {Date}
- */
 export function endOfDay(date) {
   const d = new Date(date);
   d.setHours(23, 59, 59, 999);
   return d;
 }
 
-/**
- * تحويل تاريخ إلى نص YYYY-MM-DD (للتصدير والعرض).
- * @param {Date|string} date
- * @returns {string}
- */
 export function formatDate(date) {
   if (!date) return '';
   try {
@@ -75,11 +55,6 @@ export function formatDate(date) {
   }
 }
 
-/**
- * تحويل تاريخ + وقت إلى نص (للترويسة).
- * @param {Date|string} date
- * @returns {string}
- */
 export function formatDateTime(date) {
   if (!date) return '';
   try {
@@ -89,13 +64,6 @@ export function formatDateTime(date) {
   }
 }
 
-/**
- * التحقق من نطاق تاريخي (from/to) وإرجاعهما كـ Date.
- * @param {string} from
- * @param {string} to
- * @returns {{ from: Date, to: Date }}
- * @throws {AppError}
- */
 export function validateRange(from, to) {
   const f = startOfDay(from);
   const t = endOfDay(to);
@@ -113,10 +81,6 @@ export function validateRange(from, to) {
   return { from: f, to: t };
 }
 
-/**
- * نطاق تاريخي افتراضي (هذا الشهر — من أول الشهر إلى اليوم).
- * @returns {{ from: Date, to: Date }}
- */
 export function defaultMonthRange() {
   const now = new Date();
   const from = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -124,10 +88,6 @@ export function defaultMonthRange() {
   return { from: startOfDay(from), to: endOfDay(to) };
 }
 
-/**
- * نطاق تاريخي افتراضي (آخر 30 يوماً).
- * @returns {{ from: Date, to: Date }}
- */
 export function defaultLast30Days() {
   const to = new Date();
   const from = new Date();
@@ -136,17 +96,9 @@ export function defaultLast30Days() {
 }
 
 /* ─────────────────────────────────────────────────────────────
- * 3) بيانات الترويسة (للتصدير)
+ * 3) بيانات الترويسة
  * ───────────────────────────────────────────────────────────── */
 
-/**
- * بناء meta object لتمريره إلى التصدير.
- * @param {Object} params
- * @param {string} params.title - عنوان التقرير
- * @param {Date} [params.from]
- * @param {Date} [params.to]
- * @returns {Object}
- */
 export function makeExportMeta({ title, from, to }) {
   return {
     title,
@@ -162,15 +114,9 @@ export function makeExportMeta({ title, from, to }) {
 }
 
 /* ─────────────────────────────────────────────────────────────
- * 4) تصنيف الحسابات (للتحليل المالي)
+ * 4) تصنيف الحسابات
  * ───────────────────────────────────────────────────────────── */
 
-/**
- * تصنيف حساب حسب أول رقم من كوده.
- * 1 = أصول، 2 = خصوم، 3 = حقوق ملكية، 4 = إيرادات، 5 = تكاليف، 6 = مصروفات.
- * @param {string} accountCode
- * @returns {'asset'|'liability'|'equity'|'revenue'|'cost'|'expense'|'unknown'}
- */
 export function classifyAccount(accountCode) {
   const code = String(accountCode || '').trim();
   if (!code) return 'unknown';
@@ -184,9 +130,6 @@ export function classifyAccount(accountCode) {
   return 'unknown';
 }
 
-/**
- * تسمية عربية لنوع الحساب.
- */
 export const ACCOUNT_TYPE_LABELS = Object.freeze({
   asset: 'أصول',
   liability: 'خصوم',
@@ -203,6 +146,7 @@ export const ACCOUNT_TYPE_LABELS = Object.freeze({
 
 /**
  * تسميات أنواع القيود المحاسبية.
+ * ✅ 🅲: حُذفت 5 أنواع CHECK_* (Check أُلغي).
  */
 export const ENTRY_TYPE_LABELS = Object.freeze({
   [ACCOUNTING_ENTRY_TYPES.SALE_CASH]: 'بيع نقدي',
@@ -211,11 +155,7 @@ export const ENTRY_TYPE_LABELS = Object.freeze({
   [ACCOUNTING_ENTRY_TYPES.CUSTOMER_PAYMENT]: 'دفعة عميل',
   [ACCOUNTING_ENTRY_TYPES.PURCHASE]: 'مشتريات',
   [ACCOUNTING_ENTRY_TYPES.PURCHASE_RETURN]: 'مرتجع مشتريات',
-  [ACCOUNTING_ENTRY_TYPES.CHECK_RECEIVED]: 'استلام شيك',
-  [ACCOUNTING_ENTRY_TYPES.CHECK_COLLECTED]: 'تحصيل شيك',
-  [ACCOUNTING_ENTRY_TYPES.CHECK_BOUNCED]: 'ارتداد شيك',
-  [ACCOUNTING_ENTRY_TYPES.CHECK_ISSUED]: 'إصدار شيك',
-  [ACCOUNTING_ENTRY_TYPES.CHECK_PAID]: 'صرف شيك',
+  // ⚠️ 🅲: حُذفت CHECK_RECEIVED / CHECK_COLLECTED / CHECK_BOUNCED / CHECK_ISSUED / CHECK_PAID
   [ACCOUNTING_ENTRY_TYPES.CASH_TRANSFER]: 'تحويل نقدي',
   [ACCOUNTING_ENTRY_TYPES.CASH_DEPOSIT]: 'إيداع نقدي',
   [ACCOUNTING_ENTRY_TYPES.CASH_WITHDRAWAL]: 'سحب نقدي',
@@ -237,23 +177,8 @@ export const INVOICE_STATUS_LABELS = Object.freeze({
   [INVOICE_STATUS.CANCELLED]: 'ملغاة',
 });
 
-/**
- * تسميات حالات الشيك.
- */
-export const CHECK_STATUS_LABELS = Object.freeze({
-  [CHECK_STATUS.PENDING]: 'معلّق',
-  [CHECK_STATUS.PAID]: 'مصروف',
-  [CHECK_STATUS.BOUNCED]: 'مرتد',
-  [CHECK_STATUS.CANCELLED]: 'ملغى',
-});
-
-/**
- * تسميات أنواع الشيك.
- */
-export const CHECK_TYPE_LABELS = Object.freeze({
-  [CHECK_TYPES.INCOMING]: 'وارد',
-  [CHECK_TYPES.OUTGOING]: 'صادر',
-});
+// ⚠️ 🅲: حُذف CHECK_STATUS_LABELS (Check أُلغي)
+// ⚠️ 🅲: حُذف CHECK_TYPE_LABELS (Check أُلغي)
 
 /**
  * تسميات طرق الدفع.
@@ -268,12 +193,6 @@ export const PAYMENT_TYPE_LABELS = Object.freeze({
  * 6) Scope — الفلترة حسب الدور
  * ───────────────────────────────────────────────────────────── */
 
-/**
- * بناء شرط scope حسب دور المستخدم.
- * ⚠️ يتحقق من type of `linkedEntity.id` (ObjectId أو string أو كائن).
- * @param {Object} req
- * @returns {Object}
- */
 export function buildScope(req) {
   if (!req?.user) return {};
 
@@ -286,7 +205,6 @@ export function buildScope(req) {
   }
 
   if (req.user.role === 'pharmacy') {
-    // ⚠️ linkedEntity قد يكون: null | { type, id } | { _id }
     const raw = req.user.linkedEntity;
     let customerId = null;
 
@@ -299,29 +217,17 @@ export function buildScope(req) {
     if (customerId && mongoose.Types.ObjectId.isValid(String(customerId))) {
       return { pharmacy: new mongoose.Types.ObjectId(String(customerId)) };
     }
-    // صيدلية غير مربوطة → لا ترى شيئاً
     return { pharmacy: new mongoose.Types.ObjectId('000000000000000000000000') };
   }
 
   return {};
 }
 
-/**
- * التحقق من صلاحية ObjectId.
- * @param {string} id
- * @returns {boolean}
- */
 export function isValidObjectId(id) {
   if (!id) return false;
   return mongoose.Types.ObjectId.isValid(String(id));
 }
 
-/**
- * تحويل آمن إلى ObjectId (يرمي 400 إن لم يكن صالحاً).
- * @param {string} id
- * @param {string} [fieldName]
- * @returns {mongoose.Types.ObjectId}
- */
 export function toObjectId(id, fieldName = 'id') {
   if (!isValidObjectId(id)) {
     throw new AppError(`${fieldName} غير صالح.`, 400, 'INVALID_ID');
@@ -330,30 +236,15 @@ export function toObjectId(id, fieldName = 'id') {
 }
 
 /* ─────────────────────────────────────────────────────────────
- * 7) الترقيم (pagination)
+ * 7) الترقيم
  * ───────────────────────────────────────────────────────────── */
 
-/**
- * حساب skip/limit من page/limit.
- * @param {Object} params
- * @param {number} [params.page=1]
- * @param {number} [params.limit=100]
- * @returns {{ skip: number, limit: number, page: number }}
- */
 export function pagination({ page = 1, limit = 100 } = {}) {
   const p = Math.max(1, Number(page) || 1);
   const l = Math.min(500, Math.max(1, Number(limit) || 100));
   return { skip: (p - 1) * l, limit: l, page: p };
 }
 
-/**
- * بناء meta للترقيم (للاستجابة).
- * @param {Object} params
- * @param {number} params.page
- * @param {number} params.limit
- * @param {number} params.total
- * @returns {Object}
- */
 export function paginationMeta({ page, limit, total }) {
   return {
     page,
@@ -367,23 +258,11 @@ export function paginationMeta({ page, limit, total }) {
  * 8) مساعدات صغيرة
  * ───────────────────────────────────────────────────────────── */
 
-/**
- * إرجاع قيمة أو بديل عند null/undefined/فراغ.
- * @param {*} value
- * @param {string} [fallback='—']
- * @returns {*}
- */
 export function orDash(value, fallback = '—') {
   if (value === null || value === undefined || value === '') return fallback;
   return value;
 }
 
-/**
- * اسم مختصر للصيدلية/المورد (للجداول).
- * @param {Object} doc
- * @param {string} [field='name']
- * @returns {string}
- */
 export function partyName(doc, field = 'name') {
   if (!doc) return '—';
   return doc[field] || '—';
@@ -391,12 +270,12 @@ export function partyName(doc, field = 'name') {
 
 /* ─────────────────────────────────────────────────────────────
  * 9) التصدير الافتراضي
- * ───────────────────────────────────────────────────────────── */
+ * ─────────────────────────────────────────────────────────────
+ * ✅ 🅲: حُذف CHECK_STATUS_LABELS + CHECK_TYPE_LABELS.
+ */
 
 export default {
-  // تقريب
   round2,
-  // تواريخ
   startOfDay,
   endOfDay,
   formatDate,
@@ -404,25 +283,19 @@ export default {
   validateRange,
   defaultMonthRange,
   defaultLast30Days,
-  // ترويسة
   makeExportMeta,
-  // تصنيف
   classifyAccount,
   ACCOUNT_TYPE_LABELS,
-  // تسميات
   ENTRY_TYPE_LABELS,
   INVOICE_STATUS_LABELS,
-  CHECK_STATUS_LABELS,
-  CHECK_TYPE_LABELS,
+  // ⚠️ 🅲: CHECK_STATUS_LABELS — محذوف
+  // ⚠️ 🅲: CHECK_TYPE_LABELS — محذوف
   PAYMENT_TYPE_LABELS,
-  // scope
   buildScope,
   isValidObjectId,
   toObjectId,
-  // pagination
   pagination,
   paginationMeta,
-  // helpers
   orDash,
   partyName,
 };

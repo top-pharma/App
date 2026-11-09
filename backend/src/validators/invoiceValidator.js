@@ -3,10 +3,9 @@
  * @description
  * مخططات Zod للتحقق من مدخلات فواتير المبيعات — Phase 2.5.
  *
- * ⚠️ إضافة Phase 2.5:
- * - createInvoiceSchema: + overrideReason (اختياري، إلزامي عند التجاوز).
- * - finalizeInvoiceSchema: + overrideReason (اختياري).
- * - createDraftInvoiceSchema: بدون overrideReason (لأن المسودة لا تُحقق).
+ * ✅ 🅱 (2026-11-08):
+ * - حذف `deliveryNote` من كل schemas (invoiceBaseSchema, createDraftInvoiceSchema,
+ *   updateDraftInvoiceSchema, updateInvoiceSchema (omit), listInvoicesQuerySchema).
  */
 
 import { z } from 'zod';
@@ -60,7 +59,7 @@ const discountSchema = z.object({
 const invoiceBaseSchema = z.object({
   pharmacy: objectIdSchema,
   salesRep: objectIdSchema,
-  deliveryNote: optionalObjectIdSchema,
+  // ⚠️ 🅱: حُذف `deliveryNote`
   warehouse: optionalObjectIdSchema,
   items: z.array(invoiceItemSchema).min(1, 'الفاتورة يجب أن تحتوي على بند واحد على الأقل.'),
   subtotal: nonNegativeNumberSchema(0),
@@ -81,13 +80,6 @@ const invoiceBaseSchema = z.object({
 // الإنشاء المباشر (فاتورة نهائية)
 // ============================================================
 
-/**
- * POST /api/invoices
- *
- * ⚠️ Phase 2.5:
- * - overrideReason: إلزامي إذا اكتشف Service تجاوزاً في أي سطر.
- *   يُتحقق منه في `invoiceService` (ليس في Zod).
- */
 export const createInvoiceSchema = invoiceBaseSchema
   .extend({
     overrideReason: optionalTextSchema(500),
@@ -149,7 +141,7 @@ export const createInvoiceSchema = invoiceBaseSchema
 export const createDraftInvoiceSchema = z.object({
   pharmacy: objectIdSchema,
   salesRep: objectIdSchema,
-  deliveryNote: optionalObjectIdSchema,
+  // ⚠️ 🅱: حُذف `deliveryNote`
   warehouse: objectIdSchema,
   items: z.array(invoiceItemSchema).min(1, 'المسودة يجب أن تحتوي على بند واحد على الأقل.'),
   discount: discountSchema.omit({ computedAmount: true, freeItems: true }).extend({ freeItems: z.array(freeItemSchema).default([]) }).optional(),
@@ -173,7 +165,7 @@ export const createDraftInvoiceSchema = z.object({
 export const updateDraftInvoiceSchema = z
   .object({
     salesRep: objectIdSchema.optional(),
-    deliveryNote: optionalObjectIdSchema,
+    // ⚠️ 🅱: حُذف `deliveryNote`
     warehouse: objectIdSchema.optional(),
     items: z.array(invoiceItemSchema).min(1).optional(),
     discount: discountSchema.omit({ computedAmount: true }).optional(),
@@ -191,12 +183,6 @@ export const updateDraftInvoiceSchema = z
 // اعتماد مسودة
 // ============================================================
 
-/**
- * POST /api/invoices/:id/finalize
- *
- * ⚠️ Phase 2.5:
- * - overrideReason: إلزامي إذا اكتشف Service تجاوزاً.
- */
 export const finalizeInvoiceSchema = z
   .object({
     paymentType: z.enum(['cash', 'credit', 'installments'], { errorMap: () => ({ message: 'نوع الدفع غير معتمد.' }) }),
@@ -221,7 +207,7 @@ export const finalizeInvoiceSchema = z
 // ============================================================
 
 export const updateInvoiceSchema = invoiceBaseSchema
-  .omit({ pharmacy: true, salesRep: true, deliveryNote: true, warehouse: true, paymentType: true, totalInstallments: true, paidAmount: true })
+  .omit({ pharmacy: true, salesRep: true, warehouse: true, paymentType: true, totalInstallments: true, paidAmount: true })
   .partial()
   .refine((data) => Object.keys(data).length > 0, { message: 'لا توجد حقول للتعديل.' });
 
@@ -235,7 +221,7 @@ export const listInvoicesQuerySchema = z.object({
   search: z.string().trim().max(100).optional(),
   pharmacy: optionalObjectIdSchema,
   salesRep: optionalObjectIdSchema,
-  deliveryNote: optionalObjectIdSchema,
+  // ⚠️ 🅱: حُذف `deliveryNote`
   warehouse: optionalObjectIdSchema,
   status: z.enum(['draft', 'pending', 'paid', 'partial', 'overdue', 'cancelled']).optional(),
   paymentType: z.enum(['cash', 'credit', 'installments']).optional(),
@@ -244,6 +230,7 @@ export const listInvoicesQuerySchema = z.object({
   hasReturns: queryBooleanSchema,
   isDraft: queryBooleanSchema,
   hasPriceOverride: queryBooleanSchema,
+  deliveryStatus: z.enum(['pending', 'delivered', 'returned']).optional(),  // ✅ 🅱: جديد
   dateFrom: optionalDateSchema,
   dateTo: optionalDateSchema,
   sortBy: z.enum(['createdAt', 'invoiceDate', 'total', 'paidAmount', 'remainingAmount', 'dueDate']).default('invoiceDate'),
@@ -274,6 +261,15 @@ export const invoiceIdParamsSchema = z.object({
 });
 
 // ============================================================
+// ✅ 🅱: تعليم التسليم (جديد)
+// ============================================================
+
+export const markDeliveredSchema = z.object({
+  receivedBy: z.string().trim().max(100).optional().or(z.literal('')),
+  signature: z.string().max(200000).optional().or(z.literal('')),  // Data URL
+});
+
+// ============================================================
 // تصدير موحّد
 // ============================================================
 
@@ -287,4 +283,5 @@ export default {
   cancelInvoiceSchema,
   registerPaymentSchema,
   invoiceIdParamsSchema,
+  markDeliveredSchema,  // ✅ 🅱
 };

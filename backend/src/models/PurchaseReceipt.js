@@ -57,16 +57,16 @@ const purchaseItemSchema = new Schema(
 
 /**
  * Schema الدفعة المقدّمة للمورّد.
+ *
  */
 const purchaseInitialPaymentSchema = new Schema(
   {
     amount: { type: Number, default: 0, min: 0 },
     method: {
       type: String,
-      enum: ['cash', 'bank', 'check'],
+      enum: ['cash', 'bank'],
       default: 'cash',
     },
-    checkId: { type: Schema.Types.ObjectId, ref: 'Check', default: null },
     paidAt: { type: Date, default: null },
     paidBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
   },

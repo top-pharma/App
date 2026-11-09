@@ -3,7 +3,7 @@
  * @description
  * قلب النظام المحاسبي في Phase 3.
  *
- * كل عملية مالية (فاتورة، دفع، مرتجع، مشتريات، شيك، تحويل صندوق)
+ * كل عملية مالية (فاتورة، دفع، مرتجع، مشتريات، تحويل صندوق، مصروف)
  * يجب أن تمر من هنا لإنشاء القيد المحاسبي المناسب.
  *
  * المبادئ:
@@ -11,6 +11,12 @@
  *  - كل قيد مرتبط بمصدره (sourceType + sourceId) لمنع التكرار.
  *  - لا نستخدم MongoDB Transactions (standalone) → Rollback يدوي.
  *  - القيود immutable بعد الإنشاء — التصحيح بقيد عكسي.
+ *
+ * ✅ 🅲 (2026-11-08):
+ *  - حُذفت دوال الشيكات:
+ *    createCheckReceivedEntry / createCheckCollectedEntry / createCheckBouncedEntry.
+ *  - حُذف CHECK_RECEIVABLE / CHECKS_PAYABLE من ACCOUNT_CODES.
+ *  - createCustomerPaymentEntry — حُذف paymentMethod='check' (فقط cash + bank).
  */
 
 import mongoose from 'mongoose';
@@ -23,12 +29,14 @@ import { AppError } from '../middlewares/errorMiddleware.js';
 
 /* ─────────────────────────────────────────────────────────────
  * 1) خريطة الحسابات (Chart of Accounts)
- * ───────────────────────────────────────────────────────────── */
+ * ─────────────────────────────────────────────────────────────
+ * ✅ 🅲: حُذف CHECKS_RECEIVABLE + CHECKS_PAYABLE (Check أُلغي).
+ */
 export const ACCOUNT_CODES = Object.freeze({
   CASH: '1001',
   BANK: '1002',
-  CHECKS_RECEIVABLE: '1003',
-  CHECKS_PAYABLE: '2001',
+  // ⚠️ 🅲: حُذف CHECKS_RECEIVABLE ('1003')
+  // ⚠️ 🅲: حُذف CHECKS_PAYABLE ('2001')
   ACCOUNTS_RECEIVABLE: '1101',
   ACCOUNTS_PAYABLE: '2101',
   INVENTORY: '1201',
@@ -327,7 +335,9 @@ export const createSaleCreditEntry = async ({
 };
 
 /**
- * قيد تحصيل من عميل (نقدي / بنكي / شيك).
+ * قيد تحصيل من عميل (نقدي / بنكي).
+ *
+ * ✅ 🅲: حُذف paymentMethod === 'check' — فقط cash + bank.
  */
 export const createCustomerPaymentEntry = async ({
   amount,
@@ -343,9 +353,7 @@ export const createCustomerPaymentEntry = async ({
   const debitAccount =
     paymentMethod === 'bank'
       ? { code: ACCOUNT_CODES.BANK, name: 'البنك' }
-      : paymentMethod === 'check'
-        ? { code: ACCOUNT_CODES.CHECKS_RECEIVABLE, name: 'شيكات برسم التحصيل' }
-        : { code: ACCOUNT_CODES.CASH, name: 'الصندوق النقدي' };
+      : { code: ACCOUNT_CODES.CASH, name: 'الصندوق النقدي' };
 
   return createEntry({
     entryType: 'CUSTOMER_PAYMENT',
@@ -465,119 +473,15 @@ export const createSaleReturnEntry = async ({
   });
 };
 
-/**
- * قيد استلام شيك (شيكات برسم التحصيل مدين / ذمم دائن).
- * ملاحظة: في النسخة المبسطة لا يُستخدم — الشيك لا يُنشئ قيداً حتى الصرف.
+/* ─────────────────────────────────────────────────────────────
+ * ⚠️ 🅲: دوال الشيكات — محذوفة
+ * ─────────────────────────────────────────────────────────────
+ * - createCheckReceivedEntry  (CHECK_RECEIVED)
+ * - createCheckCollectedEntry (CHECK_COLLECTED)
+ * - createCheckBouncedEntry   (CHECK_BOUNCED)
+ *
+ * Check أُلغي — هذه الدوال لم تعد تُستخدم.
  */
-export const createCheckReceivedEntry = async ({
-  amount,
-  date = new Date(),
-  sourceType,
-  sourceId,
-  user,
-  description,
-}) => {
-  return createEntry({
-    entryType: 'CHECK_RECEIVED',
-    entryDate: date,
-    description: description || 'استلام شيك',
-    lines: [
-      {
-        accountCode: ACCOUNT_CODES.CHECKS_RECEIVABLE,
-        accountName: 'شيكات برسم التحصيل',
-        debit: amount,
-        credit: 0,
-        description: 'شيك وارد',
-      },
-      {
-        accountCode: ACCOUNT_CODES.ACCOUNTS_RECEIVABLE,
-        accountName: 'ذمم العملاء',
-        debit: 0,
-        credit: amount,
-        description: 'تخفيض ذمم',
-      },
-    ],
-    sourceType,
-    sourceId,
-    user,
-  });
-};
-
-/**
- * قيد تحصيل شيك (بنك مدين / شيكات برسم التحصيل دائن).
- */
-export const createCheckCollectedEntry = async ({
-  amount,
-  date = new Date(),
-  sourceType,
-  sourceId,
-  bankAccountId,
-  user,
-  description,
-}) => {
-  return createEntry({
-    entryType: 'CHECK_COLLECTED',
-    entryDate: date,
-    description: description || 'تحصيل شيك',
-    lines: [
-      {
-        accountCode: ACCOUNT_CODES.BANK,
-        accountName: 'البنك',
-        debit: amount,
-        credit: 0,
-        description: 'إيداع بنكي',
-      },
-      {
-        accountCode: ACCOUNT_CODES.CHECKS_RECEIVABLE,
-        accountName: 'شيكات برسم التحصيل',
-        debit: 0,
-        credit: amount,
-        description: 'إغلاق شيك',
-      },
-    ],
-    sourceType,
-    sourceId,
-    bankAccountId,
-    user,
-  });
-};
-
-/**
- * قيد ارتداد شيك (ذمم مدينة / شيكات برسم التحصيل دائن).
- */
-export const createCheckBouncedEntry = async ({
-  amount,
-  date = new Date(),
-  sourceType,
-  sourceId,
-  user,
-  description,
-}) => {
-  return createEntry({
-    entryType: 'CHECK_BOUNCED',
-    entryDate: date,
-    description: description || 'ارتداد شيك',
-    lines: [
-      {
-        accountCode: ACCOUNT_CODES.ACCOUNTS_RECEIVABLE,
-        accountName: 'ذمم العملاء',
-        debit: amount,
-        credit: 0,
-        description: 'إعادة فتح ذمة',
-      },
-      {
-        accountCode: ACCOUNT_CODES.CHECKS_RECEIVABLE,
-        accountName: 'شيكات برسم التحصيل',
-        debit: 0,
-        credit: amount,
-        description: 'إلغاء شيك',
-      },
-    ],
-    sourceType,
-    sourceId,
-    user,
-  });
-};
 
 /**
  * قيد تحويل بين صندوقين.
@@ -709,19 +613,10 @@ export const reverseEntry = async ({ entryId, user, reason }) => {
 
 /* ─────────────────────────────────────────────────────────────
  * 5.5) جلب القيود بالمصدر — جديد (Phase 3)
- * ─────────────────────────────────────────────────────────────
- * تُستخدم في:
- *  - reverseCashTransaction (التحقق من وجود قيد قبل العكس)
- *  - CheckService.bounceCheck (عكس قيد الصرف)
- *  - invoiceService.cancelInvoice (عكس قيود الفاتورة)
- */
+ * ───────────────────────────────────────────────────────────── */
 
 /**
  * يجلب القيد المرتبط بمصدر محدد (غير المُعكَس) — واحد فقط.
- * @param {Object} params
- * @param {string} params.sourceType
- * @param {mongoose.Types.ObjectId} params.sourceId
- * @returns {Promise<Object|null>}
  */
 export const getEntryBySource = async ({ sourceType, sourceId }) => {
   if (!sourceType || !sourceId) return null;
@@ -735,12 +630,6 @@ export const getEntryBySource = async ({ sourceType, sourceId }) => {
 
 /**
  * يجلب جميع القيود المرتبطة بمصدر محدد (غير المُعكسة).
- * يُستخدم في invoiceService.cancelInvoice — لأن الفاتورة قد تُنشئ
- * أكثر من قيد (SALE_CASH + COGS، أو SALE_CREDIT + COGS).
- * @param {Object} params
- * @param {string} params.sourceType
- * @param {mongoose.Types.ObjectId} params.sourceId
- * @returns {Promise<Array>}
  */
 export const getEntriesBySource = async ({ sourceType, sourceId }) => {
   if (!sourceType || !sourceId) return [];
@@ -821,7 +710,9 @@ export const getDefaultBankAccount = async () => {
 
 /* ─────────────────────────────────────────────────────────────
  * 8) التصدير الافتراضي
- * ───────────────────────────────────────────────────────────── */
+ * ─────────────────────────────────────────────────────────────
+ * ✅ 🅲: حُذفت 3 دوال createCheck*Entry.
+ */
 export default {
   ACCOUNT_CODES,
   createEntry,
@@ -830,9 +721,9 @@ export default {
   createCustomerPaymentEntry,
   createPurchaseEntry,
   createSaleReturnEntry,
-  createCheckReceivedEntry,
-  createCheckCollectedEntry,
-  createCheckBouncedEntry,
+  // ⚠️ 🅲: createCheckReceivedEntry — محذوف
+  // ⚠️ 🅲: createCheckCollectedEntry — محذوف
+  // ⚠️ 🅲: createCheckBouncedEntry — محذوف
   createCashTransferEntry,
   createExpenseEntry,
   reverseEntry,

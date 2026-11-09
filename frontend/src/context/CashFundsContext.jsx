@@ -3,6 +3,14 @@
  *
  * Context لإدارة صناديق النقدية في الواجهة.
  * يُوفّر: قائمة الصناديق، الصندوق الافتراضي، دوال CRUD، حركات.
+ *
+ * ⚠️ Phase A (2026-11-07): إصلاح showToast
+ * - success/error بدل showToast.
+ *
+ * ⚠️ Phase A.8 (2026-11-07): إصلاح fetchFunds
+ * - cashFundsAPI.getCashFunds الآن يعيد { items, pagination }.
+ * - fetchFunds يقرأ result.items (وليس result.data).
+ * - fallback: result.data (للتوافق مع أي API قديم).
  */
 
 import { createContext, useState, useEffect, useCallback, useMemo, useContext } from 'react';
@@ -14,7 +22,7 @@ const CashFundsContext = createContext(null);
 
 export const CashFundsProvider = ({ children }) => {
   const { user } = useAuth();
-  const { showToast } = useToast();
+  const { success, error: showError } = useToast();
 
   const [funds, setFunds] = useState([]);
   const [defaultFund, setDefaultFund] = useState(null);
@@ -23,6 +31,7 @@ export const CashFundsProvider = ({ children }) => {
 
   /**
    * جلب الصناديق من API.
+   * ⚠️ Phase A.8: result = { items, pagination } (من normalizeListWithId).
    */
   const fetchFunds = useCallback(
     async (params = {}) => {
@@ -30,16 +39,28 @@ export const CashFundsProvider = ({ children }) => {
       setError(null);
       try {
         const result = await cashFundsAPI.getCashFunds({ limit: 100, ...params });
-        setFunds(result.data || []);
-        const def = (result.data || []).find((f) => f.isDefault && f.isActive);
+        // ⚠️ Phase A.8: result.items (مع fallback لـ result.data)
+        const list =
+          (Array.isArray(result?.items) ? result.items : null) ||
+          (Array.isArray(result?.data) ? result.data : null) ||
+          [];
+        setFunds(list);
+        const def = list.find((f) => f.isDefault && f.isActive);
         setDefaultFund(def || null);
       } catch (err) {
-        setError(err.response?.data?.message || 'فشل جلب الصناديق');
+        const msg =
+          err?.error?.message ||
+          err?.response?.data?.error?.message ||
+          err?.response?.data?.message ||
+          err?.message ||
+          'فشل جلب الصناديق';
+        setError(msg);
+        showError(msg);
       } finally {
         setLoading(false);
       }
     },
-    []
+    [showError]
   );
 
   // تحميل أولي عند تسجيل الدخول
@@ -52,12 +73,22 @@ export const CashFundsProvider = ({ children }) => {
    */
   const createFund = useCallback(
     async (payload) => {
-      const created = await cashFundsAPI.createCashFund(payload);
-      await fetchFunds();
-      showToast('تم إنشاء الصندوق', 'success');
-      return created;
+      try {
+        const created = await cashFundsAPI.createCashFund(payload);
+        await fetchFunds();
+        success('تم إنشاء الصندوق');
+        return created;
+      } catch (err) {
+        const msg =
+          err?.error?.message ||
+          err?.response?.data?.error?.message ||
+          err?.message ||
+          'فشل إنشاء الصندوق';
+        showError(msg);
+        throw err;
+      }
     },
-    [fetchFunds, showToast]
+    [fetchFunds, success, showError]
   );
 
   /**
@@ -65,12 +96,22 @@ export const CashFundsProvider = ({ children }) => {
    */
   const updateFund = useCallback(
     async (id, payload) => {
-      const updated = await cashFundsAPI.updateCashFund(id, payload);
-      await fetchFunds();
-      showToast('تم تحديث الصندوق', 'success');
-      return updated;
+      try {
+        const updated = await cashFundsAPI.updateCashFund(id, payload);
+        await fetchFunds();
+        success('تم تحديث الصندوق');
+        return updated;
+      } catch (err) {
+        const msg =
+          err?.error?.message ||
+          err?.response?.data?.error?.message ||
+          err?.message ||
+          'فشل تحديث الصندوق';
+        showError(msg);
+        throw err;
+      }
     },
-    [fetchFunds, showToast]
+    [fetchFunds, success, showError]
   );
 
   /**
@@ -78,11 +119,21 @@ export const CashFundsProvider = ({ children }) => {
    */
   const deleteFund = useCallback(
     async (id) => {
-      await cashFundsAPI.deleteCashFund(id);
-      await fetchFunds();
-      showToast('تم حذف/تعطيل الصندوق', 'success');
+      try {
+        await cashFundsAPI.deleteCashFund(id);
+        await fetchFunds();
+        success('تم حذف/تعطيل الصندوق');
+      } catch (err) {
+        const msg =
+          err?.error?.message ||
+          err?.response?.data?.error?.message ||
+          err?.message ||
+          'فشل حذف الصندوق';
+        showError(msg);
+        throw err;
+      }
     },
-    [fetchFunds, showToast]
+    [fetchFunds, success, showError]
   );
 
   /**
@@ -90,11 +141,21 @@ export const CashFundsProvider = ({ children }) => {
    */
   const setAsDefault = useCallback(
     async (id) => {
-      await cashFundsAPI.setDefaultCashFund(id);
-      await fetchFunds();
-      showToast('تم تعيين الصندوق كافتراضي', 'success');
+      try {
+        await cashFundsAPI.setDefaultCashFund(id);
+        await fetchFunds();
+        success('تم تعيين الصندوق كافتراضي');
+      } catch (err) {
+        const msg =
+          err?.error?.message ||
+          err?.response?.data?.error?.message ||
+          err?.message ||
+          'فشل تعيين الصندوق كافتراضي';
+        showError(msg);
+        throw err;
+      }
     },
-    [fetchFunds, showToast]
+    [fetchFunds, success, showError]
   );
 
   /**
@@ -102,12 +163,22 @@ export const CashFundsProvider = ({ children }) => {
    */
   const movement = useCallback(
     async (id, payload) => {
-      const result = await cashFundsAPI.cashFundMovement(id, payload);
-      await fetchFunds();
-      showToast(payload.type === 'deposit' ? 'تم الإيداع' : 'تم السحب', 'success');
-      return result;
+      try {
+        const result = await cashFundsAPI.cashFundMovement(id, payload);
+        await fetchFunds();
+        success(payload.type === 'deposit' ? 'تم الإيداع' : 'تم السحب');
+        return result;
+      } catch (err) {
+        const msg =
+          err?.error?.message ||
+          err?.response?.data?.error?.message ||
+          err?.message ||
+          'فشل تنفيذ الحركة';
+        showError(msg);
+        throw err;
+      }
     },
-    [fetchFunds, showToast]
+    [fetchFunds, success, showError]
   );
 
   const value = useMemo(
@@ -123,10 +194,23 @@ export const CashFundsProvider = ({ children }) => {
       setAsDefault,
       movement,
     }),
-    [funds, defaultFund, loading, error, fetchFunds, createFund, updateFund, deleteFund, setAsDefault, movement]
+    [
+      funds,
+      defaultFund,
+      loading,
+      error,
+      fetchFunds,
+      createFund,
+      updateFund,
+      deleteFund,
+      setAsDefault,
+      movement,
+    ]
   );
 
-  return <CashFundsContext.Provider value={value}>{children}</CashFundsContext.Provider>;
+  return (
+    <CashFundsContext.Provider value={value}>{children}</CashFundsContext.Provider>
+  );
 };
 
 /**

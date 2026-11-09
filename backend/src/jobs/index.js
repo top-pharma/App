@@ -3,12 +3,15 @@
  * @description
  * مجدول المهام الخلفية (Cron Jobs).
  *
+ * ✅ 🅲 (2026-11-08):
+ * - حُذف checkDueAlert (Check أُلغي).
+ * - المهام المتبقية: expiryAlert, reorderAlert, invoiceDueAlert (3×08:00) + autoBackup (1×02:00).
+ *
  * المهام المُفعّلة:
  *  - 08:00 (Africa/Khartoum):
  *      • expiryAlert     : الدفعات القاربة على الانتهاء (Phase 1)
  *      • reorderAlert    : الأصناف تحت الحد الأدنى (Phase 1)
  *      • invoiceDueAlert : الفواتير المتأخرة (Phase 2)
- *      • checkDueAlert   : الشيكات المستحقة/المتأخرة (Phase 3)
  *  - 02:00 (Africa/Khartoum):
  *      • autoBackup      : نسخة JSON احتياطية (Phase 5.5)
  */
@@ -17,7 +20,7 @@ import cron from 'node-cron';
 import runExpiryAlert from './expiryAlert.js';
 import runReorderAlert from './reorderAlert.js';
 import runInvoiceDueAlert from './invoiceDueAlert.js';
-import runCheckDueAlert from './checkDueAlert.js';
+// ⚠️ 🅲: حُذف import runCheckDueAlert
 import { startAutoBackupJob, runAutoBackup } from './autoBackup.js';
 import logger from '../utils/logger.js';
 
@@ -64,29 +67,26 @@ export const startJobs = () => {
     { timezone: 'Africa/Khartoum' }
   );
 
-  // ─── Phase 3: checkDueAlert ───
-  cron.schedule(
-    '0 8 * * *',
-    safeJob(runCheckDueAlert, 'checkDueAlert'),
-    { timezone: 'Africa/Khartoum' }
-  );
+  // ⚠️ 🅲: حُذف checkDueAlert (Check أُلغي)
 
   // ─── Phase 5.5: autoBackup (02:00) ───
   startAutoBackupJob();
 
-  logger.info('[jobs] ⏰ تم تفعيل 5 مهام مجدولة (4×08:00 + 1×02:00 Africa/Khartoum)');
+  logger.info('[jobs] ⏰ تم تفعيل 4 مهام مجدولة (3×08:00 + 1×02:00 Africa/Khartoum)');
 };
 
 /**
  * يُشغّل جميع المهام يدوياً (للاستخدام في scripts/test-jobs.js).
  * @returns {Promise<Object>} ملخص النتائج
+ *
+ * ✅ 🅲: حُذف checkDueAlert.
  */
 export const runAllJobsManually = async () => {
   const results = {
     expiryAlert: null,
     reorderAlert: null,
     invoiceDueAlert: null,
-    checkDueAlert: null,
+    // ⚠️ 🅲: حُذف checkDueAlert
     autoBackup: null,
     errors: [],
   };
@@ -95,7 +95,7 @@ export const runAllJobsManually = async () => {
     { name: 'expiryAlert', fn: runExpiryAlert },
     { name: 'reorderAlert', fn: runReorderAlert },
     { name: 'invoiceDueAlert', fn: runInvoiceDueAlert },
-    { name: 'checkDueAlert', fn: runCheckDueAlert },
+    // ⚠️ 🅲: حُذف checkDueAlert
     { name: 'autoBackup', fn: runAutoBackup },
   ];
 

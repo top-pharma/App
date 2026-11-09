@@ -9,6 +9,10 @@
  * - تحترم `location.state.from` للعودة إلى المسار المطلوب بعد الدخول.
  * - `PublicRoute` يمنع المستخدم المسجل من رؤيتها مجدداً.
  * - تعرض رسائل خطأ واضحة (من الخادم أو محلياً).
+ *
+ * ✅ الخيار A (2026-11-09):
+ * - إضافة اللوغو (/logo.png) في أعلى الصفحة (بدل أيقونة LogIn)
+ * - إضافة onError لإخفاء الصورة إن لم توجد
  */
 
 import { useEffect, useState } from 'react';
@@ -69,8 +73,16 @@ function LoginPage() {
       <div className="w-full max-w-md">
         {/* ─── الشعار ─── */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary-800 text-white mb-4 shadow-lg">
-            <LogIn size={28} />
+          {/* ✅ الخيار A: اللوغو الحقيقي (بدل LogIn icon) */}
+          <div className="inline-flex items-center justify-center w-24 h-24 rounded-2xl bg-white border border-neutral-200 mb-4 shadow-lg overflow-hidden p-2">
+            <img
+              src="/logo.png"
+              alt="شعار TOP PHARMA"
+              className="w-full h-full object-contain"
+              onError={(e) => {
+                e.target.style.display = 'none';
+              }}
+            />
           </div>
           <h1 className="text-2xl font-bold text-neutral-900">TOP PHARMA</h1>
           <p className="text-sm text-neutral-600 mt-1">

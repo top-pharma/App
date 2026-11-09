@@ -1,70 +1,40 @@
 /**
- * bankAccountsAPI.js
- *
- * طبقة الاتصال بـ API الحسابات البنكية.
+ * @file bankAccountsAPI.js
+ * @description دوال API للحسابات البنكية — Phase A.8.
  */
 
 import axiosInstance from './axiosInstance.js';
+import { normalizeListWithId, withId } from './_helpers.js';
 
-/**
- * جلب قائمة الحسابات البنكية.
- * @param {Object} [params]
- * @returns {Promise<Object>}
- */
-export const getBankAccounts = async (params = {}) => {
+export async function getBankAccounts(params = {}) {
   const { data } = await axiosInstance.get('/bank-accounts', { params });
-  return data;
-};
+  return normalizeListWithId(data);
+}
 
-/**
- * جلب الحساب البنكي النشط.
- * @returns {Promise<Object|null>}
- */
-export const getActiveBankAccount = async () => {
+export async function getActiveBankAccount() {
   const { data } = await axiosInstance.get('/bank-accounts/active');
-  return data.data;
-};
+  return withId(data.data);
+}
 
-/**
- * جلب حساب واحد.
- * @param {string} id
- * @returns {Promise<Object>}
- */
-export const getBankAccount = async (id) => {
+export async function getBankAccount(id) {
   const { data } = await axiosInstance.get(`/bank-accounts/${id}`);
-  return data.data;
-};
+  return withId(data.data);
+}
 
-/**
- * إنشاء حساب بنكي.
- * @param {Object} payload
- * @returns {Promise<Object>}
- */
-export const createBankAccount = async (payload) => {
+export async function createBankAccount(payload) {
   const { data } = await axiosInstance.post('/bank-accounts', payload);
-  return data.data;
-};
+  return withId(data.data);
+}
 
-/**
- * تحديث حساب بنكي.
- * @param {string} id
- * @param {Object} payload
- * @returns {Promise<Object>}
- */
-export const updateBankAccount = async (id, payload) => {
+export async function updateBankAccount(id, payload) {
   const { data } = await axiosInstance.patch(`/bank-accounts/${id}`, payload);
-  return data.data;
-};
+  return withId(data.data);
+}
 
-/**
- * تعطيل حساب بنكي.
- * @param {string} id
- * @returns {Promise<Object>}
- */
-export const deleteBankAccount = async (id) => {
+export async function deleteBankAccount(id) {
   const { data } = await axiosInstance.delete(`/bank-accounts/${id}`);
   return data.data;
-};
+}
 
 export default {
   getBankAccounts,

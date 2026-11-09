@@ -1,27 +1,30 @@
 ﻿/**
  * @file financeReportController.js
  * @description
- * 6 ØªÙ‚Ø§Ø±ÙŠØ± Ù…Ø§Ù„ÙŠØ©:
- *   1. Ù…ÙŠØ²Ø§Ù† Ø§Ù„Ù…Ø±Ø§Ø¬Ø¹Ø© (Trial Balance)
- *   2. Ø§Ù„Ø­Ø±ÙƒØ§Øª Ø§Ù„Ù†Ù‚Ø¯ÙŠØ© (Cash Transactions)
- *   3. Ø£Ø±ØµØ¯Ø© Ø§Ù„ØµÙ†Ø§Ø¯ÙŠÙ‚ (Fund Balances)
- *   4. Ø§Ù„Ø´ÙŠÙƒØ§Øª (Checks)
- *   5. Ø§Ù„Ù…ØµØ±ÙˆÙØ§Øª (Expenses)
- *   6. Ø§Ù„Ø¥ÙŠØ±Ø§Ø¯Ø§Øª - Ø§Ù„Ù…ØµØ±ÙˆÙØ§Øª (Income Summary)
+ * 5 تقارير مالية (بعد 🅲):
+ *   1. ميزان المراجعة (Trial Balance)
+ *   2. الحركات النقدية (Cash Transactions)
+ *   3. أرصدة الصناديق والبنك (Fund Balances)
+ *   4. المصروفات (Expenses)
+ *   5. الإيرادات - المصروفات (Income Summary)
  *
- * Ø§Ù„Ù…Ø¨Ø§Ø¯Ø¦:
- *  - ÙƒÙ„ ØªÙ‚Ø±ÙŠØ± ÙŠØ¯Ø¹Ù… JSON + Excel + PDF (Ø¹Ø¨Ø± query param format).
- *  - Ø§Ù„Ø´ÙŠÙƒØ§Øª ØªÙÙ‚Ø±Ø£ Ù…Ù† Check Ù…Ø¨Ø§Ø´Ø±Ø© (Ù„Ø§ Ù…Ù† CashTransaction).
- *  - Ø§Ù„ØµÙ†Ø§Ø¯ÙŠÙ‚ ØªØ³ØªØ®Ø¯Ù… currentBalance (ÙˆÙ„ÙŠØ³ balance).
- *  - Ù…ÙŠØ²Ø§Ù† Ø§Ù„Ù…Ø±Ø§Ø¬Ø¹Ø© ÙŠØ³ØªØ®Ø¯Ù… accountingService.getTrialBalance.
- *  - Ø§Ù„Ø­Ø±ÙƒØ§Øª Ø§Ù„Ù†Ù‚Ø¯ÙŠØ© ØªØ³ØªØ®Ø¯Ù… cashService.getCashSummary Ù„Ù„Ù€ KPIs.
+ * ✅ 🅲 (2026-11-08):
+ * - حُذف تقرير الشيكات (getChecksReport) — Check أُلغي.
+ * - حُذف import Check من '../models/Check.js'.
+ * - حُذف CHECK_STATUS_LABELS + CHECK_TYPE_LABELS من reportService.js imports.
+ * - حُذف 'شيك' من تسمية method في getCashTransactionsReport.
+ *
+ * المبادئ:
+ *  - كل تقرير يدعم JSON + Excel + PDF (عبر query param format).
+ *  - الصناديق تستخدم currentBalance (وليس balance).
+ *  - ميزان المراجعة يستخدم accountingService.getTrialBalance.
  */
 
 import AccountingEntry from '../models/AccountingEntry.js';
 import CashTransaction from '../models/CashTransaction.js';
 import CashFund from '../models/CashFund.js';
 import BankAccount from '../models/BankAccount.js';
-import Check from '../models/Check.js';
+// ⚠️ 🅲: حُذف import Check
 
 import accountingService from '../services/accountingService.js';
 import cashService from '../services/cashService.js';
@@ -34,8 +37,8 @@ import {
   classifyAccount,
   ACCOUNT_TYPE_LABELS,
   ENTRY_TYPE_LABELS,
-  CHECK_STATUS_LABELS,
-  CHECK_TYPE_LABELS,
+  // ⚠️ 🅲: حُذف CHECK_STATUS_LABELS
+  // ⚠️ 🅲: حُذف CHECK_TYPE_LABELS
 } from '../services/reportService.js';
 import exportService from '../services/exportService.js';
 const { exportToExcel, exportToPdf } = exportService;
@@ -43,21 +46,12 @@ import { ACCOUNTING_ENTRY_TYPES } from '../utils/constants.js';
 import { AppError } from '../middlewares/errorMiddleware.js';
 import { logger } from '../utils/logger.js';
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+/* ─────────────────────────────────────────────────────────────
  * Helpers
- * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+ * ───────────────────────────────────────────────────────────── */
 
 /**
- * ØªØµØ¯ÙŠØ± Ù…ÙˆØ­Ø¯ (JSON / Excel / PDF).
- * @param {Object} req
- * @param {Object} res
- * @param {Object} params
- * @param {string} params.title
- * @param {string[]} params.columns
- * @param {Array<Array>} params.rows
- * @param {Object} params.meta
- * @param {Array<Object>} [params.summaryRows]
- * @param {Object} params.jsonData - Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„ØªÙŠ ØªÙØ±Ø³Ù„ Ø¥Ù† Ù„Ù… ÙŠÙƒÙ† format
+ * تصدير موحد (JSON / Excel / PDF).
  */
 async function respond({
   req,
@@ -110,14 +104,14 @@ async function respond({
     );
     return res.send(buffer);
   } catch (err) {
-    logger.error(`[financeReport] ÙØ´Ù„ ØªØµØ¯ÙŠØ± ${title}: ${err.message}`);
+    logger.error(`[financeReport] فشل تصدير ${title}: ${err.message}`);
     throw err;
   }
 }
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
- * 1) Ù…ÙŠØ²Ø§Ù† Ø§Ù„Ù…Ø±Ø§Ø¬Ø¹Ø©
- * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─────────────────────────────────────────────────────────────
+ * 1) ميزان المراجعة
+ * ───────────────────────────────────────────────────────────── */
 
 export async function getTrialBalance(req, res, next) {
   try {
@@ -129,7 +123,7 @@ export async function getTrialBalance(req, res, next) {
       const type = classifyAccount(r.accountCode);
       return {
         accountCode: r.accountCode,
-        accountName: r.accountName || 'â€”',
+        accountName: r.accountName || '—',
         accountType: type,
         accountTypeLabel: ACCOUNT_TYPE_LABELS[type] || type,
         debit: round2(r.totalDebit),
@@ -142,7 +136,7 @@ export async function getTrialBalance(req, res, next) {
     const totalCredit = round2(lines.reduce((s, l) => s + l.credit, 0));
     const balanced = Math.abs(totalDebit - totalCredit) < 0.01;
 
-    const meta = makeExportMeta({ title: 'Ù…ÙŠØ²Ø§Ù† Ø§Ù„Ù…Ø±Ø§Ø¬Ø¹Ø©', from, to });
+    const meta = makeExportMeta({ title: 'ميزان المراجعة', from, to });
 
     const rowsForExport = lines.map((l) => [
       l.accountCode,
@@ -156,12 +150,12 @@ export async function getTrialBalance(req, res, next) {
     return respond({
       req,
       res,
-      title: 'Ù…ÙŠØ²Ø§Ù† Ø§Ù„Ù…Ø±Ø§Ø¬Ø¹Ø©',
-      columns: ['ÙƒÙˆØ¯ Ø§Ù„Ø­Ø³Ø§Ø¨', 'Ø§Ø³Ù… Ø§Ù„Ø­Ø³Ø§Ø¨', 'Ø§Ù„Ù†ÙˆØ¹', 'Ù…Ø¯ÙŠÙ†', 'Ø¯Ø§Ø¦Ù†', 'Ø§Ù„Ø±ØµÙŠØ¯'],
+      title: 'ميزان المراجعة',
+      columns: ['كود الحساب', 'اسم الحساب', 'النوع', 'مدين', 'دائن', 'الرصيد'],
       rows: rowsForExport,
       meta,
       summaryRows: [
-        ['', 'Ø§Ù„Ø¥Ø¬Ù…Ø§Ù„ÙŠ', '', totalDebit, totalCredit, round2(totalDebit - totalCredit)],
+        ['', 'الإجمالي', '', totalDebit, totalCredit, round2(totalDebit - totalCredit)],
       ],
       jsonData: {
         period: { from, to },
@@ -174,9 +168,9 @@ export async function getTrialBalance(req, res, next) {
   }
 }
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
- * 2) Ø§Ù„Ø­Ø±ÙƒØ§Øª Ø§Ù„Ù†Ù‚Ø¯ÙŠØ©
- * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─────────────────────────────────────────────────────────────
+ * 2) الحركات النقدية
+ * ───────────────────────────────────────────────────────────── */
 
 export async function getCashTransactionsReport(req, res, next) {
   try {
@@ -205,10 +199,10 @@ export async function getCashTransactionsReport(req, res, next) {
     const lines = transactions.map((t) => {
       const accountName =
         t.method === 'cash'
-          ? t.cashFundId?.name || 'â€”'
+          ? t.cashFundId?.name || '—'
           : t.method === 'bank'
-            ? t.bankAccountId?.name || t.bankAccountId?.bankName || 'â€”'
-            : 'â€”';
+            ? t.bankAccountId?.name || t.bankAccountId?.bankName || '—'
+            : '—';
       return {
         _id: t._id,
         transactionNumber: t.transactionNumber,
@@ -217,7 +211,7 @@ export async function getCashTransactionsReport(req, res, next) {
         method: t.method,
         accountName,
         direction: t.direction,
-        directionLabel: t.direction === 'in' ? 'Ø¯Ø®ÙˆÙ„' : 'Ø®Ø±ÙˆØ¬',
+        directionLabel: t.direction === 'in' ? 'دخول' : 'خروج',
         amount: round2(t.amount),
         description: t.description || '',
         referenceType: t.referenceType || '',
@@ -232,12 +226,13 @@ export async function getCashTransactionsReport(req, res, next) {
     );
     const net = round2(totalIn - totalOut);
 
-    const meta = makeExportMeta({ title: 'Ø§Ù„Ø­Ø±ÙƒØ§Øª Ø§Ù„Ù†Ù‚Ø¯ÙŠØ©', from, to });
+    const meta = makeExportMeta({ title: 'الحركات النقدية', from, to });
 
     const rowsForExport = lines.map((l) => [
       l.dateLabel,
       l.transactionNumber,
-      l.method === 'cash' ? 'ØµÙ†Ø¯ÙˆÙ‚' : l.method === 'bank' ? 'Ø¨Ù†Ùƒ' : 'Ø´ÙŠÙƒ',
+      // ✅ 🅲: فقط صندوق/بنك (لا شيك)
+      l.method === 'cash' ? 'صندوق' : 'بنك',
       l.accountName,
       l.directionLabel,
       l.amount,
@@ -247,14 +242,14 @@ export async function getCashTransactionsReport(req, res, next) {
     return respond({
       req,
       res,
-      title: 'Ø§Ù„Ø­Ø±ÙƒØ§Øª Ø§Ù„Ù†Ù‚Ø¯ÙŠØ©',
-      columns: ['Ø§Ù„ØªØ§Ø±ÙŠØ®', 'Ø±Ù‚Ù… Ø§Ù„Ø­Ø±ÙƒØ©', 'Ø§Ù„Ø·Ø±ÙŠÙ‚Ø©', 'Ø§Ù„Ø­Ø³Ø§Ø¨', 'Ø§Ù„Ø§ØªØ¬Ø§Ù‡', 'Ø§Ù„Ù…Ø¨Ù„Øº', 'Ø§Ù„ÙˆØµÙ'],
+      title: 'الحركات النقدية',
+      columns: ['التاريخ', 'رقم الحركة', 'الطريقة', 'الحساب', 'الاتجاه', 'المبلغ', 'الوصف'],
       rows: rowsForExport,
       meta,
       summaryRows: [
-        ['', '', '', 'Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„Ø¯Ø®ÙˆÙ„', '', totalIn, ''],
-        ['', '', '', 'Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„Ø®Ø±ÙˆØ¬', '', totalOut, ''],
-        ['', '', '', 'Ø§Ù„ØµØ§ÙÙŠ', '', net, ''],
+        ['', '', '', 'إجمالي الدخول', '', totalIn, ''],
+        ['', '', '', 'إجمالي الخروج', '', totalOut, ''],
+        ['', '', '', 'الصافي', '', net, ''],
       ],
       jsonData: {
         period: { from, to },
@@ -269,9 +264,9 @@ export async function getCashTransactionsReport(req, res, next) {
   }
 }
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
- * 3) Ø£Ø±ØµØ¯Ø© Ø§Ù„ØµÙ†Ø§Ø¯ÙŠÙ‚ ÙˆØ§Ù„Ø¨Ù†Ùƒ
- * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─────────────────────────────────────────────────────────────
+ * 3) أرصدة الصناديق والبنك
+ * ───────────────────────────────────────────────────────────── */
 
 export async function getFundBalancesReport(req, res, next) {
   try {
@@ -286,20 +281,20 @@ export async function getFundBalancesReport(req, res, next) {
     const lines = [
       ...funds.map((f) => ({
         type: 'cash',
-        typeLabel: 'ØµÙ†Ø¯ÙˆÙ‚',
+        typeLabel: 'صندوق',
         name: f.name,
         code: f.code,
         openingBalance: round2(f.openingBalance || 0),
-        currentBalance: round2(f.currentBalance || 0), // âš ï¸ currentBalance
+        currentBalance: round2(f.currentBalance || 0),
         isDefault: !!f.isDefault,
       })),
       ...banks.map((b) => ({
         type: 'bank',
-        typeLabel: 'Ø¨Ù†Ùƒ',
-        name: `${b.name} â€” ${b.bankName}`,
+        typeLabel: 'بنك',
+        name: `${b.name} — ${b.bankName}`,
         code: b.accountNumber,
         openingBalance: round2(b.openingBalance || 0),
-        currentBalance: round2(b.currentBalance || 0), // âš ï¸ currentBalance
+        currentBalance: round2(b.currentBalance || 0),
         isDefault: !!b.isDefault,
       })),
     ];
@@ -312,7 +307,7 @@ export async function getFundBalancesReport(req, res, next) {
     );
     const total = round2(totalCash + totalBank);
 
-    const meta = makeExportMeta({ title: 'Ø£Ø±ØµØ¯Ø© Ø§Ù„ØµÙ†Ø§Ø¯ÙŠÙ‚ ÙˆØ§Ù„Ø¨Ù†Ùƒ' });
+    const meta = makeExportMeta({ title: 'أرصدة الصناديق والبنك' });
 
     const rowsForExport = lines.map((l) => [
       l.typeLabel,
@@ -325,14 +320,14 @@ export async function getFundBalancesReport(req, res, next) {
     return respond({
       req,
       res,
-      title: 'Ø£Ø±ØµØ¯Ø© Ø§Ù„ØµÙ†Ø§Ø¯ÙŠÙ‚ ÙˆØ§Ù„Ø¨Ù†Ùƒ',
-      columns: ['Ø§Ù„Ù†ÙˆØ¹', 'Ø§Ù„Ø§Ø³Ù…', 'Ø§Ù„ÙƒÙˆØ¯', 'Ø§Ù„Ø§ÙØªØªØ§Ø­ÙŠ', 'Ø§Ù„Ø­Ø§Ù„ÙŠ'],
+      title: 'أرصدة الصناديق والبنك',
+      columns: ['النوع', 'الاسم', 'الكود', 'الافتتاحي', 'الحالي'],
       rows: rowsForExport,
       meta,
       summaryRows: [
-        ['', 'Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„Ù†Ù‚Ø¯', '', '', totalCash],
-        ['', 'Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„Ø¨Ù†Ùƒ', '', '', totalBank],
-        ['', 'Ø§Ù„Ø¥Ø¬Ù…Ø§Ù„ÙŠ', '', '', total],
+        ['', 'إجمالي النقد', '', '', totalCash],
+        ['', 'إجمالي البنك', '', '', totalBank],
+        ['', 'الإجمالي', '', '', total],
       ],
       jsonData: {
         lines,
@@ -344,126 +339,16 @@ export async function getFundBalancesReport(req, res, next) {
   }
 }
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
- * 4) Ø§Ù„Ø´ÙŠÙƒØ§Øª
- * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+// ⚠️ 🅲: getChecksReport() — محذوفة (Check أُلغي)
 
-export async function getChecksReport(req, res, next) {
-  try {
-    const filter = {};
-    if (req.query.from || req.query.to) {
-      const from = req.query.from ? new Date(req.query.from) : new Date('2000-01-01');
-      const to = req.query.to ? new Date(req.query.to) : new Date();
-      to.setHours(23, 59, 59, 999);
-      filter.dueDate = { $gte: from, $lte: to };
-    }
-    if (req.query.status && req.query.status !== 'all') filter.status = req.query.status;
-    if (req.query.type && req.query.type !== 'all') filter.type = req.query.type;
-
-    const checks = await Check.find(filter)
-      .populate('customerId', 'name phone')
-      .populate('supplierId', 'name phone')
-      .populate('invoiceId', 'invoiceNumber')
-      .sort({ dueDate: 1 })
-      .limit(2000)
-      .lean();
-
-    const now = Date.now();
-    const lines = checks.map((c) => {
-      const isOverdue =
-        c.status === 'pending' && c.dueDate && new Date(c.dueDate).getTime() < now;
-      const daysUntilDue = c.dueDate
-        ? Math.ceil((new Date(c.dueDate).getTime() - now) / (1000 * 60 * 60 * 24))
-        : null;
-      return {
-        _id: c._id,
-        checkNumber: c.checkNumber,
-        type: c.type,
-        typeLabel: CHECK_TYPE_LABELS[c.type] || c.type,
-        bankName: c.bankName,
-        amount: round2(c.amount),
-        issueDate: c.issueDate,
-        dueDate: c.dueDate,
-        dueDateLabel: formatDate(c.dueDate),
-        daysUntilDue,
-        status: c.status,
-        statusLabel: CHECK_STATUS_LABELS[c.status] || c.status,
-        isOverdue,
-        customerName: c.customerId?.name || '',
-        supplierName: c.supplierId?.name || '',
-        invoiceNumber: c.invoiceId?.invoiceNumber || '',
-        paymentMethod: c.paymentMethod || '',
-      };
-    });
-
-    const totals = {
-      pending: round2(
-        lines.filter((l) => l.status === 'pending').reduce((s, l) => s + l.amount, 0)
-      ),
-      paid: round2(
-        lines.filter((l) => l.status === 'paid').reduce((s, l) => s + l.amount, 0)
-      ),
-      bounced: round2(
-        lines.filter((l) => l.status === 'bounced').reduce((s, l) => s + l.amount, 0)
-      ),
-      overdue: round2(lines.filter((l) => l.isOverdue).reduce((s, l) => s + l.amount, 0)),
-      pendingCount: lines.filter((l) => l.status === 'pending').length,
-      paidCount: lines.filter((l) => l.status === 'paid').length,
-      bouncedCount: lines.filter((l) => l.status === 'bounced').length,
-      overdueCount: lines.filter((l) => l.isOverdue).length,
-    };
-
-    const meta = makeExportMeta({
-      title: 'ØªÙ‚Ø±ÙŠØ± Ø§Ù„Ø´ÙŠÙƒØ§Øª',
-      from: req.query.from ? new Date(req.query.from) : undefined,
-      to: req.query.to ? new Date(req.query.to) : undefined,
-    });
-
-    const rowsForExport = lines.map((l) => [
-      l.checkNumber,
-      l.typeLabel,
-      l.bankName,
-      l.type === 'incoming' ? l.customerName : l.supplierName,
-      l.amount,
-      l.dueDateLabel,
-      l.statusLabel,
-      l.isOverdue ? `Ù…ØªØ£Ø®Ø± ${Math.abs(l.daysUntilDue)} ÙŠÙˆÙ…` : '',
-    ]);
-
-    return respond({
-      req,
-      res,
-      title: 'ØªÙ‚Ø±ÙŠØ± Ø§Ù„Ø´ÙŠÙƒØ§Øª',
-      columns: ['Ø§Ù„Ø±Ù‚Ù…', 'Ø§Ù„Ù†ÙˆØ¹', 'Ø§Ù„Ø¨Ù†Ùƒ', 'Ø§Ù„Ø·Ø±Ù', 'Ø§Ù„Ù…Ø¨Ù„Øº', 'Ø§Ù„Ø§Ø³ØªØ­Ù‚Ø§Ù‚', 'Ø§Ù„Ø­Ø§Ù„Ø©', 'Ù…Ù„Ø§Ø­Ø¸Ø©'],
-      rows: rowsForExport,
-      meta,
-      summaryRows: [
-        ['', 'Ù…Ø¹Ù„Ù‘Ù‚', '', '', totals.pending, '', `${totals.pendingCount} Ø´ÙŠÙƒ`, ''],
-        ['', 'Ù…ØµØ±ÙˆÙ', '', '', totals.paid, '', `${totals.paidCount} Ø´ÙŠÙƒ`, ''],
-        ['', 'Ù…Ø±ØªØ¯', '', '', totals.bounced, '', `${totals.bouncedCount} Ø´ÙŠÙƒ`, ''],
-        ['', 'Ù…ØªØ£Ø®Ø±', '', '', totals.overdue, '', `${totals.overdueCount} Ø´ÙŠÙƒ`, ''],
-      ],
-      jsonData: {
-        period: { from: req.query.from, to: req.query.to },
-        lines,
-        totals,
-        count: lines.length,
-      },
-    });
-  } catch (err) {
-    next(err);
-  }
-}
-
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
- * 5) Ø§Ù„Ù…ØµØ±ÙˆÙØ§Øª
- * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─────────────────────────────────────────────────────────────
+ * 4) المصروفات
+ * ───────────────────────────────────────────────────────────── */
 
 export async function getExpensesReport(req, res, next) {
   try {
     const { from, to } = validateRange(req.query.from, req.query.to);
 
-    // Ù…Ù† Ø§Ù„Ù‚ÙŠÙˆØ¯ Ø§Ù„Ù…Ø­Ø§Ø³Ø¨ÙŠØ©
     const entries = await AccountingEntry.find({
       entryDate: { $gte: from, $lte: to },
       entryType: {
@@ -474,7 +359,6 @@ export async function getExpensesReport(req, res, next) {
       .sort({ entryDate: -1 })
       .lean();
 
-    // Ù…Ù† Ø§Ù„Ø­Ø±ÙƒØ§Øª Ø§Ù„Ù†Ù‚Ø¯ÙŠØ© (expense)
     const cashExpenses = await CashTransaction.find({
       transactionDate: { $gte: from, $lte: to },
       referenceType: 'expense',
@@ -501,7 +385,7 @@ export async function getExpensesReport(req, res, next) {
         dateLabel: formatDate(t.transactionDate),
         entryNumber: t.transactionNumber,
         type: 'EXPENSE',
-        typeLabel: 'Ù…ØµØ±ÙˆÙ',
+        typeLabel: 'مصروف',
         description: t.description || '',
         amount: round2(t.amount),
       })),
@@ -509,7 +393,7 @@ export async function getExpensesReport(req, res, next) {
 
     const total = round2(lines.reduce((s, l) => s + l.amount, 0));
 
-    const meta = makeExportMeta({ title: 'ØªÙ‚Ø±ÙŠØ± Ø§Ù„Ù…ØµØ±ÙˆÙØ§Øª', from, to });
+    const meta = makeExportMeta({ title: 'تقرير المصروفات', from, to });
 
     const rowsForExport = lines.map((l) => [
       l.dateLabel,
@@ -522,11 +406,11 @@ export async function getExpensesReport(req, res, next) {
     return respond({
       req,
       res,
-      title: 'ØªÙ‚Ø±ÙŠØ± Ø§Ù„Ù…ØµØ±ÙˆÙØ§Øª',
-      columns: ['Ø§Ù„ØªØ§Ø±ÙŠØ®', 'Ø§Ù„Ù…Ø±Ø¬Ø¹', 'Ø§Ù„Ù†ÙˆØ¹', 'Ø§Ù„ÙˆØµÙ', 'Ø§Ù„Ù…Ø¨Ù„Øº'],
+      title: 'تقرير المصروفات',
+      columns: ['التاريخ', 'المرجع', 'النوع', 'الوصف', 'المبلغ'],
       rows: rowsForExport,
       meta,
-      summaryRows: [['', '', '', 'Ø§Ù„Ø¥Ø¬Ù…Ø§Ù„ÙŠ', total]],
+      summaryRows: [['', '', '', 'الإجمالي', total]],
       jsonData: {
         period: { from, to },
         lines,
@@ -539,9 +423,9 @@ export async function getExpensesReport(req, res, next) {
   }
 }
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
- * 6) Ø§Ù„Ø¥ÙŠØ±Ø§Ø¯Ø§Øª - Ø§Ù„Ù…ØµØ±ÙˆÙØ§Øª (Ø¨Ø³ÙŠØ·)
- * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─────────────────────────────────────────────────────────────
+ * 5) الإيرادات - المصروفات
+ * ───────────────────────────────────────────────────────────── */
 
 export async function getIncomeSummaryReport(req, res, next) {
   try {
@@ -568,7 +452,6 @@ export async function getIncomeSummaryReport(req, res, next) {
       },
     ]);
 
-    // ØªØ¬Ù…ÙŠØ¹ Ø­Ø³Ø¨ Ø§Ù„Ù†ÙˆØ¹ (revenue / expense)
     const REVENUE_TYPES = new Set([
       ACCOUNTING_ENTRY_TYPES.SALE_CASH,
       ACCOUNTING_ENTRY_TYPES.SALE_CREDIT,
@@ -589,14 +472,13 @@ export async function getIncomeSummaryReport(req, res, next) {
         entryType: r._id.entryType,
         entryTypeLabel: ENTRY_TYPE_LABELS[r._id.entryType] || r._id.entryType,
         accountCode: r._id.accountCode,
-        accountName: r.accountName || 'â€”',
-        amount: round2(r.credit - r.debit), // ØµØ§ÙÙŠ (credit - debit)
+        accountName: r.accountName || '—',
+        amount: round2(r.credit - r.debit),
       };
 
       if (accountType === 'revenue' || REVENUE_TYPES.has(r._id.entryType)) {
         if (Math.abs(item.amount) > 0.01) revenueLines.push(item);
       } else if (accountType === 'expense' || EXPENSE_TYPES.has(r._id.entryType)) {
-        // Ù„Ù„Ù…ØµØ±ÙˆÙØ§Øª: ØµØ§ÙÙŠ (debit - credit)
         item.amount = round2(r.debit - r.credit);
         if (Math.abs(item.amount) > 0.01) expenseLines.push(item);
       }
@@ -606,24 +488,24 @@ export async function getIncomeSummaryReport(req, res, next) {
     const totalExpenses = round2(expenseLines.reduce((s, l) => s + l.amount, 0));
     const net = round2(totalRevenue - totalExpenses);
 
-    const meta = makeExportMeta({ title: 'Ø§Ù„Ø¥ÙŠØ±Ø§Ø¯Ø§Øª - Ø§Ù„Ù…ØµØ±ÙˆÙØ§Øª', from, to });
+    const meta = makeExportMeta({ title: 'الإيرادات - المصروفات', from, to });
 
     const rowsForExport = [
-      ...revenueLines.map((l) => ['Ø¥ÙŠØ±Ø§Ø¯', l.entryTypeLabel, l.accountName, l.amount]),
-      ...expenseLines.map((l) => ['Ù…ØµØ±ÙˆÙ', l.entryTypeLabel, l.accountName, l.amount]),
+      ...revenueLines.map((l) => ['إيراد', l.entryTypeLabel, l.accountName, l.amount]),
+      ...expenseLines.map((l) => ['مصروف', l.entryTypeLabel, l.accountName, l.amount]),
     ];
 
     return respond({
       req,
       res,
-      title: 'Ø§Ù„Ø¥ÙŠØ±Ø§Ø¯Ø§Øª - Ø§Ù„Ù…ØµØ±ÙˆÙØ§Øª',
-      columns: ['Ø§Ù„Ù†ÙˆØ¹', 'Ø§Ù„ØªØµÙ†ÙŠÙ', 'Ø§Ù„Ø­Ø³Ø§Ø¨', 'Ø§Ù„Ù…Ø¨Ù„Øº'],
+      title: 'الإيرادات - المصروفات',
+      columns: ['النوع', 'التصنيف', 'الحساب', 'المبلغ'],
       rows: rowsForExport,
       meta,
       summaryRows: [
-        ['', '', 'Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„Ø¥ÙŠØ±Ø§Ø¯Ø§Øª', totalRevenue],
-        ['', '', 'Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„Ù…ØµØ±ÙˆÙØ§Øª', totalExpenses],
-        ['', '', 'Ø§Ù„ØµØ§ÙÙŠ', net],
+        ['', '', 'إجمالي الإيرادات', totalRevenue],
+        ['', '', 'إجمالي المصروفات', totalExpenses],
+        ['', '', 'الصافي', net],
       ],
       jsonData: {
         period: { from, to },
@@ -641,11 +523,15 @@ export async function getIncomeSummaryReport(req, res, next) {
   }
 }
 
+/**
+ * ✅ 🅲: getChecksReport — محذوف.
+ * Check أُلغي.
+ */
 export default {
   getTrialBalance,
   getCashTransactionsReport,
   getFundBalancesReport,
-  getChecksReport,
+  // ⚠️ 🅲: getChecksReport — محذوف
   getExpensesReport,
   getIncomeSummaryReport,
 };

@@ -130,8 +130,7 @@ cashFundSchema.index(
   { isDefault: 1 },
   {
     unique: true,
-    partialFilterExpression: { isDefault: true },
-    name: 'unique_default_cash_fund',
+    partialFilterExpression: { isDefault: false },
   }
 );
 

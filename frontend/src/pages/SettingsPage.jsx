@@ -392,19 +392,9 @@ export default function SettingsPage() {
       </Card>
 
       {/* 4. المالية */}
+            {/* 4. المالية */}
       <Card title="إعدادات المالية" icon={Wallet} actions={saveBtn('finance')}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Input
-            label="تذكير الشيكات قبل (أيام)"
-            type="number"
-            min="0"
-            max="30"
-            value={settings.finance?.checkReminderDays ?? 3}
-            onChange={(e) =>
-              setField('finance', 'checkReminderDays', Number(e.target.value))
-            }
-            disabled={!canEdit}
-          />
           <Input
             label="تذكير الفواتير قبل (أيام)"
             type="number"

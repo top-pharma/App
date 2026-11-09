@@ -2,7 +2,9 @@
  * @file server.js
  * @description
  * نقطة دخول التطبيق (Backend) — Phase 5
- * (Reports فقط — Dashboard/Notifications/Backup مؤجلة حتى التحقق من الوحدات)
+ *
+ * ✅ 🅱 (2026-11-08):
+ * - حذف `deliveryNoteRoutes` (import + mount).
  */
 
 import express from 'express';
@@ -38,7 +40,7 @@ import stockRoutes from './routes/stockRoutes.js';
 
 // ─── Routes — Phase 2 ───
 import invoiceRoutes from './routes/invoiceRoutes.js';
-import deliveryNoteRoutes from './routes/deliveryNoteRoutes.js';
+// ⚠️ 🅱: حُذف `deliveryNoteRoutes`
 import customerReturnRoutes from './routes/customerReturnRoutes.js';
 import supplierReturnRoutes from './routes/supplierReturnRoutes.js';
 import purchaseReceiptRoutes from './routes/purchaseReceiptRoutes.js';
@@ -48,7 +50,6 @@ import cashFundRoutes from './routes/cashFundRoutes.js';
 import bankAccountRoutes from './routes/bankAccountRoutes.js';
 import cashTransactionRoutes from './routes/cashTransactionRoutes.js';
 import accountingEntryRoutes from './routes/accountingEntryRoutes.js';
-import checkRoutes from './routes/checkRoutes.js';
 
 // ─── Routes — Phase 4 (Reports) ───
 import financeReportRoutes from './routes/financeReportRoutes.js';
@@ -78,7 +79,6 @@ app.use(
   })
 );
 
-// ✅ A6: 50mb لدعم استعادة Backup مستقبلاً
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(cookieParser());
@@ -99,8 +99,8 @@ app.get('/api/health', (req, res) => {
     message: 'Pharma System API is running',
     timestamp: new Date().toISOString(),
     environment: env.NODE_ENV,
-    version: '5.0.0',
-    phase: 'Phase 5 — Reports (Dashboard/Notifications/Backup pending)',
+    version: '5.1.0',
+    phase: 'Phase B — DeliveryNote removed',
   });
 });
 
@@ -124,7 +124,7 @@ app.use('/api/stocks', stockRoutes);
  * 5) Routes — Phase 2
  * ═════════════════════════════════════════════════════════════ */
 app.use('/api/invoices', invoiceRoutes);
-app.use('/api/delivery-notes', deliveryNoteRoutes);
+// ⚠️ 🅱: حُذف `app.use('/api/delivery-notes', deliveryNoteRoutes);`
 app.use('/api/customer-returns', customerReturnRoutes);
 app.use('/api/supplier-returns', supplierReturnRoutes);
 app.use('/api/purchase-receipts', purchaseReceiptRoutes);
@@ -136,20 +136,20 @@ app.use('/api/cash-funds', cashFundRoutes);
 app.use('/api/bank-accounts', bankAccountRoutes);
 app.use('/api/cash-transactions', cashTransactionRoutes);
 app.use('/api/accounting-entries', accountingEntryRoutes);
-app.use('/api/checks', checkRoutes);
 
 /* ═════════════════════════════════════════════════════════════
- * 7) Routes — Phase 4 (Reports) — 5 مجموعات
+ * 7) Routes — Phase 4 (Reports)
  * ═════════════════════════════════════════════════════════════ */
 app.use('/api/reports/finance', financeReportRoutes);
 app.use('/api/reports/sales', salesReportRoutes);
 app.use('/api/reports/customers', customerReportRoutes);
 app.use('/api/reports/suppliers', supplierReportRoutes);
 app.use('/api/reports/inventory', inventoryReportRoutes);
-app.use('/api/dashboard', dashboardRoutes)
+app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/backup', backupRoutes);
 app.use('/api/settings', settingsRoutes);
+
 /* ═════════════════════════════════════════════════════════════
  * 8) 404 + Error handlers
  * ═════════════════════════════════════════════════════════════ */
@@ -170,7 +170,7 @@ const startServer = async () => {
       logger.info(`🚀 Server running on http://localhost:${PORT}`);
       logger.info(`   Environment: ${env.NODE_ENV}`);
       logger.info(`   Frontend URL: ${env.FRONTEND_URL}`);
-      logger.info(`   Phase: 5 — Reports (Dashboard/Notifications/Backup pending)`);
+      logger.info(`   Phase: B — DeliveryNote removed`);
     });
 
     if (env.NODE_ENV !== 'test') {

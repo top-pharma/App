@@ -10,6 +10,12 @@
  *   - AuthProvider يحتاج useToast ✓ (ToastProvider خارجه)
  *   - NotificationsProvider يحتاج useAuth + useToast ✓ (كلاهما خارجه)
  *   - باقي الـ Providers تحتاج Auth + Toast + Notifications ✓
+ *
+ * ✅ 🅱 (2026-11-08):
+ * - حُذف DeliveryNotesProvider.
+ *
+ * ✅ 🅲 (2026-11-08):
+ * - حُذف ChecksProvider (Check أُلغي).
  */
 
 // ─── Phase 0 ───
@@ -29,13 +35,13 @@ import { StockProvider } from './StockContext.jsx';
 
 // ─── Phase 2 ───
 import { InvoicesProvider } from './InvoicesContext.jsx';
-import { DeliveryNotesProvider } from './DeliveryNotesContext.jsx';
+// ⚠️ 🅱: حُذف import DeliveryNotesProvider
 import { CustomerReturnsProvider } from './CustomerReturnsContext.jsx';
 
 // ─── Phase 3 ───
 import { CashFundsProvider } from './CashFundsContext.jsx';
 import { BankAccountsProvider } from './BankAccountsContext.jsx';
-import { ChecksProvider } from './ChecksContext.jsx';
+// ⚠️ 🅲: حُذف import ChecksProvider
 
 export const AppProviders = ({ children }) => {
   return (
@@ -50,18 +56,16 @@ export const AppProviders = ({ children }) => {
                   <CustomersProvider>
                     <StockProvider>
                       <InvoicesProvider>
-                        <DeliveryNotesProvider>
-                          <CustomerReturnsProvider>
-                            {/* ── Phase 3 Providers ── */}
-                            <CashFundsProvider>
-                              <BankAccountsProvider>
-                                <ChecksProvider>
-                                  {children}
-                                </ChecksProvider>
-                              </BankAccountsProvider>
-                            </CashFundsProvider>
-                          </CustomerReturnsProvider>
-                        </DeliveryNotesProvider>
+                        {/* ⚠️ 🅱: حُذف <DeliveryNotesProvider> */}
+                        <CustomerReturnsProvider>
+                          {/* ── Phase 3 Providers ── */}
+                          <CashFundsProvider>
+                            <BankAccountsProvider>
+                              {/* ⚠️ 🅲: حُذف <ChecksProvider> */}
+                              {children}
+                            </BankAccountsProvider>
+                          </CashFundsProvider>
+                        </CustomerReturnsProvider>
                       </InvoicesProvider>
                     </StockProvider>
                   </CustomersProvider>

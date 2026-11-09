@@ -1,23 +1,25 @@
 /**
  * @file InvoiceForm.jsx
  * @description
- * نموذج إنشاء / تعديل مسودة فاتورة — Phase 2.5 + Phase 3.
+ * نموذج إنشاء / تعديل مسودة فاتورة — Phase 2.5 + Phase 3 + Phase A.
  *
- * الميزات:
- *  - وضعان: 'new' (إنشاء فاتورة مباشرة) و 'editDraft' (تعديل مسودة).
- *  - بحث عن الأصناف + إضافة بنود (InvoiceItemsTable).
- *  - FefoSelectorModal لاختيار الدفعة (FEFO) + price limits.
- *  - تحذير عند تجاوز الحد الموصى به + overrideReason إلزامي.
- *  - قسم دفع كامل: نقدي / آجل / أقساط.
- *  - ✅ Phase 3: CashSelector (اختيار الصندوق/البنك).
- *  - التحقق قبل الإرسال (cashFundId/bankAccountId إلزامي عند الدفع).
+ * ⚠️ Phase A (2026-11-07) — إعادة كتابة كاملة لمعالجة 8 مشاكل:
+ *  F1. useToast().showToast — أُضيف إلى ToastContext.
+ *  F2. salesRep initial — إصلاح أولوية العمليات.
+ *  F3. salesReps — تحميل تلقائي من usersAPI.listSalesReps.
+ *  F4. customers/warehouses — تحميل تلقائي عند mount.
+ *  F5. fetchItems يعيد { success, data: { items } } — تصحيح.
+ *  F6. FefoSelectorModal.onSelect — يُمرّر itemId + itemName + unitCost + total.
+ *  F7. buildPayload — يُرسل `item` + subtotal + taxAmount + total + discount.
+ *  F8. paymentType='cash' → paidAmount = total تلقائياً + إظهار CashSelector.
  *
- * ملاحظة:
- *  - يستخدم useState مباشرة (بلا react-hook-form) ليتوافق مع النمط الحالي.
- *  - pharmacy لا يمكن تغييره في وضع editDraft.
+ * ⚠️ Phase A.4 (2026-11-07): batch fallback
+ *  - Zod يرفض batch=null — نستخدم 'FEFO-AUTO' كـ placeholder.
+ *  - invoiceService يحوّله إلى null ويستخدم bulkIssueStock (اختيار تلقائي).
+ *  - Invoice.items[].batch = 'BATCH-...' (الحقيقي من bulkResult).
  */
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   ShoppingCart,
   Package,
@@ -42,19 +44,19 @@ import CashSelector from '../Finance/CashSelector.jsx';
 // ─── Contexts ───
 import { useCustomers } from '../../context/CustomersContext.jsx';
 import { useWarehouses } from '../../context/WarehousesContext.jsx';
-import { useItems } from '../../context/ItemsContext.jsx';import { useAuth } from '../../hooks/useAuth.js';
+import { useItems } from '../../context/ItemsContext.jsx';
+import { useAuth } from '../../hooks/useAuth.js';
 import { useToast } from '../../hooks/useToast.js';
 
-/* ═══════════════════════════════════════════════════════════════
- * InvoiceForm
- * ═══════════════════════════════════════════════════════════════
- * @param {Object} props
- * @param {'new'|'editDraft'} [props.mode='new']
- * @param {Object} [props.initialData=null] - بيانات المسودة عند editDraft
- * @param {Function} props.onSubmit - (payload) => Promise
- * @param {Function} props.onSubmitDraft - (payload) => Promise (اختياري — حفظ كمسودة)
- * @param {Function} props.onClose
+// ─── API ───
+import * as usersAPI from '../../api/usersAPI.js';
+
+/**
+ * ⚠️ Phase A.4: قيمة placeholder لـ batch (اختيار تلقائي)
+ * — Zod يحتاج string — invoiceService يحوّله إلى null.
  */
+const FEFO_AUTO_BATCH = 'FEFO-AUTO';
+
 const InvoiceForm = ({
   mode = 'new',
   initialData = null,
@@ -62,130 +64,134 @@ const InvoiceForm = ({
   onSubmitDraft,
   onClose,
 }) => {
-const { customers } = useCustomers();
-const { warehouses } = useWarehouses();
-const { items: allItems, fetchItems } = useItems();
+  // ─── Contexts ───
+  const { customers, loading: customersLoading, fetchCustomers } = useCustomers();
+  const { warehouses, loading: warehousesLoading, fetchWarehouses } = useWarehouses();
+  const { fetchItems } = useItems();
   const { user, isAdmin, isAccountant } = useAuth();
-  const { showToast } = useToast();
+  const toast = useToast();
+  const showToast = toast.showToast || (() => {});
 
-  /* ─────────────────────────────────────────────────────────
-   * 1) الحقول الأساسية
-   * ───────────────────────────────────────────────────────── */
+  const searchInputRef = useRef(null);
+
+  // ─── الحقول الأساسية ───
   const [pharmacy, setPharmacy] = useState(initialData?.pharmacy || '');
-  const [salesRep, setSalesRep] = useState(
-    initialData?.salesRep || user?.role === 'sales_rep' ? user?._id : ''
-  );
-  const [warehouse, setWarehouse] = useState(
-    initialData?.warehouse || ''
-  );
+  const [salesRep, setSalesRep] = useState(() => {
+    if (initialData?.salesRep) return initialData.salesRep;
+    if (user?.role === 'sales_rep') return user.id || user._id || '';
+    return '';
+  });
+  const [warehouse, setWarehouse] = useState(initialData?.warehouse || '');
   const [invoiceDate, setInvoiceDate] = useState(
     initialData?.invoiceDate
       ? new Date(initialData.invoiceDate).toISOString().slice(0, 10)
       : new Date().toISOString().slice(0, 10)
   );
 
-  /* ─────────────────────────────────────────────────────────
-   * 2) البنود
-   * ───────────────────────────────────────────────────────── */
+  // ─── البنود ───
   const [items, setItems] = useState(initialData?.items || []);
 
-  /* ─────────────────────────────────────────────────────────
-   * 3) قسم الدفع — Phase 2.5
-   * ───────────────────────────────────────────────────────── */
-  const [paymentType, setPaymentType] = useState(
-    initialData?.paymentType || 'cash'
-  );
+  // ─── الدفع ───
+  const [paymentType, setPaymentType] = useState(initialData?.paymentType || 'cash');
   const [dueDate, setDueDate] = useState(
-    initialData?.dueDate
-      ? new Date(initialData.dueDate).toISOString().slice(0, 10)
-      : ''
+    initialData?.dueDate ? new Date(initialData.dueDate).toISOString().slice(0, 10) : ''
   );
-  const [totalInstallments, setTotalInstallments] = useState(
-    initialData?.totalInstallments || 2
-  );
-  const [paidAmount, setPaidAmount] = useState(
-    initialData?.paidAmount || 0
-  );
-  const [paymentMethod, setPaymentMethod] = useState(
-    initialData?.paymentMethod || 'cash'
-  );
-
-  /* ─────────────────────────────────────────────────────────
-   * 4) ✅ Phase 3 — اختيار الصندوق/البنك
-   * ───────────────────────────────────────────────────────── */
+  const [totalInstallments, setTotalInstallments] = useState(initialData?.totalInstallments || 2);
+  const [paidAmount, setPaidAmount] = useState(initialData?.paidAmount || 0);
+  const [paymentMethod, setPaymentMethod] = useState(initialData?.paymentMethod || 'cash');
   const [cashFundId, setCashFundId] = useState('');
-  const [bankAccountId, setBankAccountId] = useState('');
 
-  /* ─────────────────────────────────────────────────────────
-   * 5) ملاحظات + override
-   * ───────────────────────────────────────────────────────── */
+  // ─── ملاحظات + override ───
   const [notes, setNotes] = useState(initialData?.notes || '');
-  const [overrideReason, setOverrideReason] = useState(
-    initialData?.overrideReason || ''
-  );
+  const [overrideReason, setOverrideReason] = useState(initialData?.overrideReason || '');
 
-  /* ─────────────────────────────────────────────────────────
-   * 6) حالة الإرسال
-   * ───────────────────────────────────────────────────────── */
+  // ─── حالة الإرسال ───
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  /* ─────────────────────────────────────────────────────────
-   * 7) بحث الأصناف
-   * ───────────────────────────────────────────────────────── */
+  // ─── بحث الأصناف ───
   const [itemSearch, setItemSearch] = useState('');
   const [debouncedItemSearch, setDebouncedItemSearch] = useState('');
   const [showItemResults, setShowItemResults] = useState(false);
   const [searchingItems, setSearchingItems] = useState(false);
   const [itemResults, setItemResults] = useState([]);
 
-  /* ─────────────────────────────────────────────────────────
-   * 8) FEFO Modal
-   * ───────────────────────────────────────────────────────── */
+  // ─── FEFO Modal ───
   const [selectedItemForFefo, setSelectedItemForFefo] = useState(null);
   const [isFefoOpen, setIsFefoOpen] = useState(false);
 
-  /* ─────────────────────────────────────────────────────────
-   * 9) القيم المحسوبة
-   * ───────────────────────────────────────────────────────── */
-  const salesReps = useMemo(() => {
-    // في الوضع الحقيقي: من SalesRepContext
-    // هنا نستخدم المستخدم الحالي فقط (لو مندوب)
-    if (user?.role === 'sales_rep') {
-      return [{ id: user._id, name: user.fullName || user.email }];
-    }
-    return [];
-  }, [user]);
+  // ─── المناديب ───
+  const [salesReps, setSalesReps] = useState([]);
+  const [loadingSalesReps, setLoadingSalesReps] = useState(false);
 
-  const hasOverriddenItems = useMemo(() => {
-    return items.some((it) => it.isBelowRecommended === true);
-  }, [items]);
+  // ─── القيم المحسوبة ───
+  const hasOverriddenItems = useMemo(
+    () => items.some((it) => it.isBelowRecommended === true),
+    [items]
+  );
 
   const canOverridePrice = isAdmin || isAccountant;
 
-  const subtotal = useMemo(() => {
-    return items.reduce(
-      (sum, it) => sum + Number(it.unitPrice || 0) * Number(it.quantity || 0),
-      0
-    );
-  }, [items]);
+  const subtotal = useMemo(
+    () => items.reduce((sum, it) => sum + Number(it.unitPrice || 0) * Number(it.quantity || 0), 0),
+    [items]
+  );
 
-  const total = useMemo(() => {
-    return Math.round((subtotal + Number.EPSILON) * 100) / 100;
-  }, [subtotal]);
+  const total = useMemo(() => Math.round((subtotal + Number.EPSILON) * 100) / 100, [subtotal]);
 
-  /* ─────────────────────────────────────────────────────────
-   * 10) Debounce البحث عن الأصناف
-   * ───────────────────────────────────────────────────────── */
+  /**
+   * ⚠️ Phase A.3: القيمة الفعلية للمبلغ المدفوع.
+   * - في وضع "نقدي" → paidAmount = total (تلقائياً، لا useEffect).
+   * - في وضع "آجل"/"أقساط" → paidAmount اليدوي.
+   * - هذا يضمن ظهور CashSelector فوراً عند إضافة بند.
+   */
+  const effectivePaidAmount = useMemo(() => {
+    if (paymentType === 'cash') return total;
+    return Number(paidAmount) || 0;
+  }, [paymentType, total, paidAmount]);
+
+  // ─── Debounce البحث ───
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedItemSearch(itemSearch.trim());
-    }, 300);
-    return () => clearTimeout(timer);
+    const t = setTimeout(() => setDebouncedItemSearch(itemSearch.trim()), 300);
+    return () => clearTimeout(t);
   }, [itemSearch]);
 
-  /* ─────────────────────────────────────────────────────────
-   * 11) تحميل الأصناف عند البحث
-   * ───────────────────────────────────────────────────────── */
+  // ─── F4: تحميل customers/warehouses ───
+  useEffect(() => {
+    if (!customers || customers.length === 0) {
+      fetchCustomers({ isActive: 'true', limit: 100 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!warehouses || warehouses.length === 0) {
+      fetchWarehouses({ isActive: 'true', limit: 100 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ─── F3: تحميل المناديب ───
+  useEffect(() => {
+    const loadReps = async () => {
+      setLoadingSalesReps(true);
+      try {
+        const reps = await usersAPI.listSalesReps();
+        setSalesReps(Array.isArray(reps) ? reps : []);
+      } catch {
+        setSalesReps([]);
+      } finally {
+        setLoadingSalesReps(false);
+      }
+    };
+
+    if (user?.role === 'sales_rep') {
+      setSalesReps([{ id: user.id || user._id, name: user.name || user.email }]);
+    } else {
+      loadReps();
+    }
+  }, [user]);
+
+  // ─── F5: تحميل الأصناف ───
   useEffect(() => {
     const loadItems = async () => {
       setSearchingItems(true);
@@ -195,67 +201,88 @@ const { items: allItems, fetchItems } = useItems();
           isActive: 'true',
           limit: 50,
         });
-        setItemResults(result || []);
+        const list = result?.data?.items || result?.items || [];
+        setItemResults(Array.isArray(list) ? list : []);
       } catch {
         setItemResults([]);
       } finally {
         setSearchingItems(false);
       }
     };
-    if (showItemResults) {
-      loadItems();
-    }
+    if (showItemResults) loadItems();
   }, [debouncedItemSearch, showItemResults, fetchItems]);
 
-  /* ─────────────────────────────────────────────────────────
-   * 12) إغلاق قائمة البحث عند النقر خارجها
-   * ───────────────────────────────────────────────────────── */
+  // ─── إغلاق قائمة البحث عند النقر خارجها ───
   useEffect(() => {
     if (!showItemResults) return undefined;
-    const handleClick = () => setShowItemResults(false);
-    document.addEventListener('click', handleClick);
-    return () => document.removeEventListener('click', handleClick);
+    const handleClick = (e) => {
+      if (searchInputRef.current?.contains(e.target)) return;
+      setShowItemResults(false);
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
   }, [showItemResults]);
 
-  /* ─────────────────────────────────────────────────────────
-   * 13) اختيار صنف → فتح FEFO
-   * ───────────────────────────────────────────────────────── */
   const handlePickItem = (item) => {
+    if (!warehouse) {
+      showToast('اختر المخزن أولاً', 'warning');
+      return;
+    }
     setShowItemResults(false);
     setItemSearch('');
     setSelectedItemForFefo(item);
     setIsFefoOpen(true);
   };
 
-  /* ─────────────────────────────────────────────────────────
-   * 14) تأكيد FEFO → إضافة بند
-   * ───────────────────────────────────────────────────────── */
+  // ─── F6 + Phase A.4: تأكيد FEFO ───
   const handleFefoSelect = (batchData) => {
     if (!batchData) return;
 
+    const qty = Number(batchData.quantity) || 1;
+    const price = Number(batchData.unitPrice) || 0;
+    const computedTotal = Math.round(qty * price * 100) / 100;
+
     const newItem = {
-      itemId: batchData.itemId,
-      itemName: batchData.itemName,
-      batch: batchData.batch,
-      expiry: batchData.expiry,
-      quantity: batchData.quantity || 1,
-      unitPrice: batchData.unitPrice || batchData.effectiveUnitPrice || 0,
-      unitCost: batchData.unitCost || 0,
-      isBelowRecommended: batchData.isBelowRecommended || false,
+      itemId: batchData.itemId || selectedItemForFefo?.id || selectedItemForFefo?._id,
+      itemName:
+        batchData.itemName || selectedItemForFefo?.tradeName || selectedItemForFefo?.name,
+      // ⚠️ Phase A.4: batch دائماً string — Zod يرفض null/undefined
+      batch: batchData.batch || FEFO_AUTO_BATCH,
+      expiry: batchData.expiry || null,
+      quantity: qty,
+      unitPrice: price,
+      unitCost: Number(batchData.unitCost) || 0,
+      total: computedTotal,
+      isBelowRecommended: batchData.isBelowRecommended === true,
       overrideReason: batchData.overrideReason || null,
     };
 
     setItems((prev) => [...prev, newItem]);
     setIsFefoOpen(false);
     setSelectedItemForFefo(null);
+    setTimeout(() => searchInputRef.current?.focus(), 100);
   };
 
-  /* ─────────────────────────────────────────────────────────
-   * 15) التحقق قبل الإرسال
-   * ───────────────────────────────────────────────────────── */
+  // ─── F8: تغيير نوع الدفع ───
+  const handlePaymentTypeChange = (val) => {
+    setPaymentType(val);
+    if (val === 'cash') {
+      setDueDate('');
+      setTotalInstallments(2);
+      // ⚠️ لا setPaidAmount — effectivePaidAmount = total تلقائياً
+    } else {
+      setPaidAmount(0);
+    }
+  };
+
+  // ─── التحقق ───
   const validate = () => {
     if (!pharmacy) {
       showToast('اختر الصيدلية', 'error');
+      return false;
+    }
+    if (!salesRep) {
+      showToast('اختر المندوب', 'error');
       return false;
     }
     if (!warehouse) {
@@ -270,15 +297,9 @@ const { items: allItems, fetchItems } = useItems();
       showToast('أدخل سبب تجاوز السعر', 'error');
       return false;
     }
-    if (paidAmount > 0 && paymentType === 'cash') {
-      if (paymentMethod === 'cash' && !cashFundId) {
-        showToast('اختر الصندوق', 'error');
-        return false;
-      }
-      if (paymentMethod === 'bank' && !bankAccountId) {
-        showToast('اختر الحساب البنكي', 'error');
-        return false;
-      }
+    if (effectivePaidAmount > 0 && paymentType === 'cash' && paymentMethod === 'cash' && !cashFundId) {
+      showToast('اختر الصندوق', 'error');
+      return false;
     }
     if ((paymentType === 'credit' || paymentType === 'installments') && !dueDate) {
       showToast('حدد تاريخ الاستحقاق', 'error');
@@ -291,44 +312,41 @@ const { items: allItems, fetchItems } = useItems();
     return true;
   };
 
-  /* ─────────────────────────────────────────────────────────
-   * 16) بناء الـ payload
-   * ───────────────────────────────────────────────────────── */
+  // ─── F7 + Phase A.4: buildPayload ───
   const buildPayload = () => {
+    const mappedItems = items.map((it) => ({
+      item: it.itemId || it.item?._id || it.item,
+      // ⚠️ Phase A.4: batch دائماً string — Zod يرفض null/undefined
+      batch: it.batch || FEFO_AUTO_BATCH,
+      expiry: it.expiry || undefined,
+      quantity: Number(it.quantity),
+      unitPrice: Number(it.unitPrice),
+      total: Number(it.total) || Math.round(Number(it.quantity) * Number(it.unitPrice) * 100) / 100,
+      unitCost: Number(it.unitCost || 0),
+    }));
+
     return {
       pharmacy,
-      salesRep: salesRep || null,
+      salesRep: salesRep || '',
       warehouse,
       invoiceDate,
-      items: items.map((it) => ({
-        itemId: it.itemId,
-        batch: it.batch,
-        quantity: Number(it.quantity),
-        unitPrice: Number(it.unitPrice),
-        unitCost: Number(it.unitCost || 0),
-      })),
+      items: mappedItems,
+      subtotal: Math.round(subtotal * 100) / 100,
+      discount: { type: null, value: 0, computedAmount: 0, freeItems: [] },
+      taxRate: 0,
+      taxAmount: 0,
+      total: Math.round(total * 100) / 100,
       paymentType,
-      dueDate:
-        paymentType === 'credit' || paymentType === 'installments'
-          ? dueDate
-          : null,
-      totalInstallments:
-        paymentType === 'installments' ? Number(totalInstallments) : null,
-      paidAmount: Number(paidAmount) || 0,
-      paymentMethod: paidAmount > 0 ? paymentMethod : null,
-      // ✅ Phase 3
-      cashFundId:
-        paidAmount > 0 && paymentMethod === 'cash' ? cashFundId : null,
-      bankAccountId:
-        paidAmount > 0 && paymentMethod === 'bank' ? bankAccountId : null,
-      overrideReason: hasOverriddenItems ? overrideReason.trim() : null,
-      notes: notes.trim() || null,
+      dueDate: paymentType === 'credit' || paymentType === 'installments' ? dueDate : null,
+      totalInstallments: paymentType === 'installments' ? Number(totalInstallments) : 0,
+      paidAmount: Number(effectivePaidAmount) || 0,
+      paymentMethod: effectivePaidAmount > 0 ? paymentMethod : '',
+      cashFundId: effectivePaidAmount > 0 && paymentMethod === 'cash' ? cashFundId || null : null,
+      overrideReason: hasOverriddenItems ? overrideReason.trim() : '',
+      notes: notes.trim() || '',
     };
   };
 
-  /* ─────────────────────────────────────────────────────────
-   * 17) إرسال
-   * ───────────────────────────────────────────────────────── */
   const handleSubmit = async (e) => {
     e?.preventDefault?.();
     if (!validate()) return;
@@ -337,7 +355,7 @@ const { items: allItems, fetchItems } = useItems();
     try {
       await onSubmit?.(buildPayload());
     } catch (err) {
-      showToast(err.response?.data?.message || 'فشل الحفظ', 'error');
+      showToast(err?.error?.message || err?.message || 'فشل الحفظ', 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -353,35 +371,23 @@ const { items: allItems, fetchItems } = useItems();
     setIsSubmitting(true);
     try {
       const payload = buildPayload();
-      // في المسودة: لا نرسل بيانات الدفع
       delete payload.paymentType;
       delete payload.dueDate;
       delete payload.totalInstallments;
       delete payload.paidAmount;
       delete payload.paymentMethod;
       delete payload.cashFundId;
-      delete payload.bankAccountId;
-
       await onSubmitDraft(payload);
     } catch (err) {
-      showToast(err.response?.data?.message || 'فشل حفظ المسودة', 'error');
+      showToast(err?.error?.message || err?.message || 'فشل حفظ المسودة', 'error');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  /* ═══════════════════════════════════════════════════════════════
-   * Render
-   * ═══════════════════════════════════════════════════════════════ */
   return (
-    <form
-      onSubmit={handleSubmit}
-      onClick={(e) => e.stopPropagation()}
-      className="space-y-4"
-    >
-      {/* ═══════════════════════════════════════════════════════
-       * البيانات الأساسية
-       * ═══════════════════════════════════════════════════════ */}
+    <form onSubmit={handleSubmit} onClick={(e) => e.stopPropagation()} className="space-y-4">
+      {/* ═══ 1. البيانات الأساسية ═══ */}
       <Section title="البيانات الأساسية" icon={ShoppingCart}>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <Select
@@ -393,15 +399,20 @@ const { items: allItems, fetchItems } = useItems();
               value: c.id || c._id,
               label: `${c.name}${c.phone ? ` (${c.phone})` : ''}`,
             }))}
-            disabled={mode === 'editDraft'}
+            disabled={mode === 'editDraft' || customersLoading}
+            placeholder={customersLoading ? 'جاري التحميل...' : '— اختر —'}
           />
           <Select
             label="المندوب"
             required
             value={salesRep}
             onChange={(e) => setSalesRep(e.target.value)}
-            options={salesReps.map((r) => ({ value: r.id, label: r.name }))}
-            disabled={user?.role === 'sales_rep'}
+            options={salesReps.map((r) => ({
+              value: r.id || r._id,
+              label: r.name || r.email,
+            }))}
+            disabled={user?.role === 'sales_rep' || loadingSalesReps}
+            placeholder={loadingSalesReps ? 'جاري التحميل...' : '— اختر —'}
           />
           <Select
             label="المخزن"
@@ -412,6 +423,8 @@ const { items: allItems, fetchItems } = useItems();
               value: w.id || w._id,
               label: `${w.name}${w.isDefault ? ' (افتراضي)' : ''}`,
             }))}
+            disabled={warehousesLoading}
+            placeholder={warehousesLoading ? 'جاري التحميل...' : '— اختر —'}
           />
           <Input
             label="تاريخ الفاتورة"
@@ -425,31 +438,33 @@ const { items: allItems, fetchItems } = useItems();
           <div className="mt-3 bg-info-50 border border-info-200 rounded-md p-2 text-xs text-info-800 flex items-start gap-2">
             <FileEdit size={14} className="flex-shrink-0 mt-0.5" />
             <span>
-              أنت في وضع <strong>تعديل المسودة</strong> — يمكنك تغيير البنود
-              والمبالغ بحرية.
+              أنت في وضع <strong>تعديل المسودة</strong> — يمكنك تغيير البنود والمبالغ بحرية.
             </span>
           </div>
         )}
       </Section>
 
-      {/* ═══════════════════════════════════════════════════════
-       * البنود
-       * ═══════════════════════════════════════════════════════ */}
+      {/* ═══ 2. البنود ═══ */}
       <Section title="البنود" icon={Package} description={`${items.length} بند`}>
-        {/* بحث الأصناف */}
-        <div className="relative mb-3">
+        <div className="relative mb-3" ref={searchInputRef}>
           <Input
-            placeholder="ابحث عن صنف..."
+            placeholder="ابحث عن صنف... (اكتب 2 حرف على الأقل)"
             icon={Search}
             value={itemSearch}
             onChange={(e) => setItemSearch(e.target.value)}
             onFocus={() => setShowItemResults(true)}
+            disabled={!warehouse}
           />
+
+          {!warehouse && (
+            <p className="mt-1 text-xs text-warning-700 flex items-center gap-1">
+              <AlertCircle size={12} /> اختر المخزن أولاً للبحث في الأصناف
+            </p>
+          )}
 
           {searchingItems && (
             <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-neutral-200 rounded-md shadow-lg p-3 text-center text-sm text-neutral-500 z-20">
-              <Loader2 size={16} className="inline animate-spin mr-2" />
-              جاري التحميل...
+              <Loader2 size={16} className="inline animate-spin mr-2" /> جاري التحميل...
             </div>
           )}
 
@@ -474,40 +489,26 @@ const { items: allItems, fetchItems } = useItems();
             </div>
           )}
 
-          {showItemResults &&
-            !searchingItems &&
-            itemResults.length === 0 && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-neutral-200 rounded-md shadow-lg p-3 text-center text-sm text-neutral-500 z-20">
-                <AlertCircle
-                  size={16}
-                  className="inline mr-1 text-warning-600"
-                />
-                {debouncedItemSearch
-                  ? 'لا توجد أصناف مطابقة'
-                  : 'لا توجد أصناف نشطة'}
-              </div>
-            )}
+          {showItemResults && !searchingItems && itemResults.length === 0 && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-neutral-200 rounded-md shadow-lg p-3 text-center text-sm text-neutral-500 z-20">
+              <AlertCircle size={16} className="inline mr-1 text-warning-600" />
+              {debouncedItemSearch ? 'لا توجد أصناف مطابقة' : 'لا توجد أصناف نشطة'}
+            </div>
+          )}
         </div>
 
-        {/* جدول البنود */}
         <InvoiceItemsTable
           items={items}
           onChange={setItems}
           emptyMessage="اختر صنفاً من القائمة أعلاه لإضافته."
         />
 
-        {/* تحذير تجاوز السعر */}
         {hasOverriddenItems && (
           <div className="mt-3 bg-warning-50 border-2 border-warning-300 rounded-md p-3 space-y-2">
             <div className="flex items-start gap-2">
-              <Shield
-                size={18}
-                className="text-warning-700 flex-shrink-0 mt-0.5"
-              />
+              <Shield size={18} className="text-warning-700 flex-shrink-0 mt-0.5" />
               <div className="text-sm text-warning-900">
-                <p className="font-bold">
-                  ⚠️ بعض البنود بأسعار أقل من الحد الموصى به
-                </p>
+                <p className="font-bold">⚠️ بعض البنود بأسعار أقل من الحد الموصى به</p>
                 <p className="text-xs mt-1">
                   سيُنبَّه الأدمن بعد حفظ الفاتورة.
                   {!canOverridePrice && ' لا تملك صلاحية التجاوز.'}
@@ -533,8 +534,8 @@ const { items: allItems, fetchItems } = useItems();
               <div className="bg-danger-50 border border-danger-200 rounded p-2 text-xs text-danger-800 flex items-start gap-2">
                 <Lock size={14} className="flex-shrink-0 mt-0.5" />
                 <span>
-                  لا تملك صلاحية حفظ فاتورة بأسعار أقل من الحد. عدّل الأسعار أو
-                  اطلب من المدير/المحاسب.
+                  لا تملك صلاحية حفظ فاتورة بأسعار أقل من الحد. عدّل الأسعار أو اطلب من
+                  المدير/المحاسب.
                 </span>
               </div>
             )}
@@ -542,17 +543,14 @@ const { items: allItems, fetchItems } = useItems();
         )}
       </Section>
 
-      {/* ═══════════════════════════════════════════════════════
-       * قسم الدفع — Phase 2.5 + Phase 3
-       * ═══════════════════════════════════════════════════════ */}
+      {/* ═══ 3. الدفع ═══ */}
       <Section title="الدفع" icon={CreditCard}>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {/* نوع الدفع */}
           <Select
             label="نوع الدفع"
             required
             value={paymentType}
-            onChange={(e) => setPaymentType(e.target.value)}
+            onChange={(e) => handlePaymentTypeChange(e.target.value)}
             options={[
               { value: 'cash', label: 'نقدي' },
               { value: 'credit', label: 'آجل' },
@@ -560,7 +558,6 @@ const { items: allItems, fetchItems } = useItems();
             ]}
           />
 
-          {/* تاريخ الاستحقاق (آجل/أقساط) */}
           {(paymentType === 'credit' || paymentType === 'installments') && (
             <Input
               label="تاريخ الاستحقاق"
@@ -571,7 +568,6 @@ const { items: allItems, fetchItems } = useItems();
             />
           )}
 
-          {/* عدد الأقساط */}
           {paymentType === 'installments' && (
             <Input
               label="عدد الأقساط"
@@ -583,23 +579,20 @@ const { items: allItems, fetchItems } = useItems();
             />
           )}
 
-          {/* المبلغ المدفوع */}
           <Input
-            label="المبلغ المدفوع (SDG)"
+            label={paymentType === 'cash' ? 'المبلغ المدفوع (كامل)' : 'دفعة مقدمة'}
             type="number"
-            step="0.01"
+            step="any"
             min="0"
-            value={paidAmount}
+            value={effectivePaidAmount}
             onChange={(e) => setPaidAmount(Number(e.target.value))}
             placeholder="0.00"
+            disabled={paymentType === 'cash'}
           />
         </div>
 
-        {/* إجمالي الفاتورة */}
         <div className="mt-3 bg-neutral-50 border border-neutral-200 rounded-md p-3 flex justify-between items-center">
-          <span className="text-sm font-medium text-neutral-700">
-            إجمالي الفاتورة:
-          </span>
+          <span className="text-sm font-medium text-neutral-700">إجمالي الفاتورة:</span>
           <span className="text-lg font-bold text-primary-800">
             {total.toLocaleString('en-US', {
               minimumFractionDigits: 2,
@@ -609,8 +602,7 @@ const { items: allItems, fetchItems } = useItems();
           </span>
         </div>
 
-        {/* طريقة الدفع (تظهر فقط إن كان هناك دفع) */}
-        {paidAmount > 0 && (
+        {effectivePaidAmount > 0 && (
           <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
             <Select
               label="طريقة الدفع"
@@ -619,41 +611,27 @@ const { items: allItems, fetchItems } = useItems();
               onChange={(e) => setPaymentMethod(e.target.value)}
               options={[
                 { value: 'cash', label: 'نقدي (صندوق)' },
-                { value: 'bank', label: 'بنكي' },
-                { value: 'check', label: 'شيك' },
+                { value: 'bank', label: 'تحويل بنكي' },
               ]}
             />
           </div>
         )}
 
-        {/* ✅ Phase 3 — CashSelector */}
-        {paidAmount > 0 &&
-          (paymentMethod === 'cash' || paymentMethod === 'bank') && (
-            <div className="mt-3">
-              <CashSelector
-                method={paymentMethod}
-                value={
-                  paymentMethod === 'cash' ? cashFundId : bankAccountId
-                }
-                onChange={
-                  paymentMethod === 'cash' ? setCashFundId : setBankAccountId
-                }
-                required
-                showBalance
-                label={
-                  paymentMethod === 'cash'
-                    ? 'الصندوق المستلم (إلزامي)'
-                    : 'الحساب البنكي المستلم (إلزامي)'
-                }
-              />
-            </div>
-          )}
+        {effectivePaidAmount > 0 && paymentMethod === 'cash' && (
+          <div className="mt-3">
+            <CashSelector
+              method="cash"
+              value={cashFundId}
+              onChange={setCashFundId}
+              required
+              showBalance
+              label="الصندوق المستلم (إلزامي)"
+            />
+          </div>
+        )}
 
-        {/* ملاحظات */}
         <div className="mt-3">
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            ملاحظات
-          </label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">ملاحظات</label>
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
@@ -665,9 +643,7 @@ const { items: allItems, fetchItems } = useItems();
         </div>
       </Section>
 
-      {/* ═══════════════════════════════════════════════════════
-       * أزرار الحفظ
-       * ═══════════════════════════════════════════════════════ */}
+      {/* ═══ 4. الأزرار ═══ */}
       <div className="flex justify-end gap-2 pt-4 border-t">
         <Button
           type="button"
@@ -678,7 +654,6 @@ const { items: allItems, fetchItems } = useItems();
           إلغاء
         </Button>
 
-        {/* زر حفظ المسودة — فقط في وضع new إن وُجد onSubmitDraft */}
         {mode === 'new' && onSubmitDraft && (
           <Button
             type="button"
@@ -699,9 +674,6 @@ const { items: allItems, fetchItems } = useItems();
         </Button>
       </div>
 
-      {/* ═══════════════════════════════════════════════════════
-       * Fefo Modal
-       * ═══════════════════════════════════════════════════════ */}
       {selectedItemForFefo && (
         <FefoSelectorModal
           isOpen={isFefoOpen}

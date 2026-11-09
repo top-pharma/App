@@ -6,26 +6,35 @@
  * Phase 2: إنشاء، اعتماد، دفع، إلغاء، عمولة، FEFO.
  * Phase 2.5: مسودات (draft)، تقييد أسعار، إصلاح double-deduction.
  * Phase 3: ربط بصندوق نقدي (cashFundId)، قيود محاسبية تلقائية، COGS.
+ * Phase A (2026-11-07): إصلاح 7 تناقضات (A1-A7):
+ *   A1. issueStock({ items, user }) → bulkIssueStock({ warehouseId, lines }) + بناء items
+ *   A2. returnStock({ issuedLots, user }) → returnStock({ itemId, warehouseId, batch, quantity, meta }) × N
+ *   A3. validateInvoicePrices({ items, user, overrideReason }) → validateInvoicePrices({ items, warehouseId, req })
+ *   A4. Invoice.create({ discountAmount }) → Invoice.create({ discount: { computedAmount } })
+ *   A5. items[].itemId → items[].item (يخالف Invoice.js)
+ *   A6. finalizeInvoice يستدعي issueStock — نفس A1
+ *   A7. cancelInvoice يستدعي returnStock — نفس A2
+ *
+ * ✅ Phase A.10 (2026-11-08):
+ *   - issueStockAndBuildItems يمرّر `batch` لكل سطر إلى bulkIssueStock (manual mode).
+ *   - حذف التحقق المزدوج `if (line._requestedBatch)` — issueStock يتولاه.
  *
  * المبادئ:
- *  - كل فاتورة نقدية/جزئية → CashTransaction + SALE_CASH entry + COGS entry.
- *  - كل فاتورة آجلة → SALE_CREDIT entry + تحديث Customer.currentBalance.
- *  - لا نخصم Stock إذا Invoice.deliveryNote موجود (مخصوم في الإيصال).
+ *  - كل فاتورة نقدية/جزئية → CashTransaction + SALE_CASH + COGS.
+ *  - كل فاتورة آجلة → SALE_CREDIT + تحديث Customer.currentBalance.
+ *  - لا نخصم Stock إذا Invoice.deliveryNote موجود (Phase 2.5 — سيبقى حتى 🅱).
  *  - العمولة تُحسب عند الاعتماد فقط.
  *  - القيود immutable — الإلغاء يُنشئ قيوداً عكسية.
  */
 
-import mongoose from 'mongoose';
 import Invoice from '../models/Invoice.js';
 import Customer from '../models/Customer.js';
-import Item from '../models/Item.js';
-import DeliveryNote from '../models/DeliveryNote.js';
 import Commission from '../models/Commission.js';
 import SalesRepTransaction from '../models/SalesRepTransaction.js';
 import cashService from './cashService.js';
 import accountingService from './accountingService.js';
 import priceValidationService from './priceValidationService.js';
-import { issueStock, returnStock } from './stockService.js';
+import { bulkIssueStock, returnStock } from './stockService.js';
 import { AppError } from '../middlewares/errorMiddleware.js';
 import { logAuditEvent } from '../middlewares/auditLogMiddleware.js';
 import { AUDIT_ACTIONS } from '../utils/constants.js';
@@ -39,7 +48,6 @@ const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
 /**
  * يُولّد رقم فاتورة فريد: INV-YYYYMM-000001
- * @returns {Promise<string>}
  */
 const generateInvoiceNumber = async () => {
   const now = new Date();
@@ -64,105 +72,148 @@ const generateInvoiceNumber = async () => {
 
 /**
  * يحسب المجاميع من items + discount + taxRate.
- * @param {Array} items
- * @param {number} discount - قيمة الخصم (مبلغ ثابت)
- * @param {number} taxRate - نسبة الضريبة (0-100)
- * @returns {{ subtotal, discountAmount, taxAmount, total }}
  */
-const calculateTotals = (items, discount = 0, taxRate = 0) => {
+const calculateTotals = (items, discountAmount = 0, taxRate = 0) => {
   const subtotal = round2(
     items.reduce((sum, it) => sum + Number(it.unitPrice) * Number(it.quantity), 0)
   );
-  const discountAmount = round2(Number(discount) || 0);
-  const taxableAmount = round2(subtotal - discountAmount);
+  const discount = round2(Number(discountAmount) || 0);
+  const taxableAmount = round2(subtotal - discount);
   const taxAmount = round2(taxableAmount * (Number(taxRate) / 100));
   const total = round2(taxableAmount + taxAmount);
-  return { subtotal, discountAmount, taxAmount, total };
+  return { subtotal, discountAmount: discount, taxAmount, total };
 };
 
 /**
  * يحسب تكلفة البضاعة المباعة من الدفعات المصروفة.
- * @param {Array<{ quantity: number, unitCost: number }>} issuedLots
- * @returns {number}
  */
 const calculateIssuedCost = (issuedLots) => {
   if (!Array.isArray(issuedLots)) return 0;
   return round2(
-    issuedLots.reduce((sum, lot) => sum + Number(lot.unitCost || 0) * Number(lot.quantity || 0), 0)
+    issuedLots.reduce(
+      (sum, lot) => sum + Number(lot.unitCost || 0) * Number(lot.quantity || 0),
+      0
+    )
   );
 };
 
 /**
- * يتحقق أن بنود الفاتورة متوافقة مع إيصال التسليم (لمنع double-deduction).
- * @param {string} deliveryNoteId
- * @param {Array} items
- * @returns {Promise<Object>} deliveryNote
+ * A1 + Phase A.10: يصرف المخزون عبر bulkIssueStock ثم يبني invoice items الحقيقية.
+ *
+ * ✅ Phase A.10:
+ *   - يمرّر `batch` (manual) أو `null` (FEFO) إلى bulkIssueStock.
+ *   - حذف التحقق المزدوج `if (line._requestedBatch)` — issueStock يتولاه الآن.
+ *
+ * @param {Object} params
+ * @param {Array} params.items - items الفاتورة (بعد Zod: [{ item, batch, quantity, unitPrice, unitCost }])
+ * @param {string} params.warehouseId
+ * @param {Object} params.user
+ * @returns {Promise<{ issuedLots: Array, invoiceItems: Array }>}
+ *   issuedLots: [{ stockId, batch, expiry, quantity, unitCost }] — مسطّحة، للـ rollback و COGS
+ *   invoiceItems: [{ item, batch, expiry, quantity, unitPrice, total, unitCost }] — للفاتورة
  */
-const validateDeliveryNoteItems = async (deliveryNoteId, items) => {
-  const dn = await DeliveryNote.findById(deliveryNoteId);
-  if (!dn) {
-    throw new AppError('إيصال التسليم غير موجود', 404, 'DELIVERY_NOTE_NOT_FOUND');
-  }
+const issueStockAndBuildItems = async ({ items, warehouseId, user }) => {
+  // ⚠️ Phase A.10: نبني lines لـ bulkIssueStock مع `batch` (manual) أو `null` (FEFO)
+  const lines = items.map((it) => {
+    // batch: 'FEFO-AUTO' → null (FEFO mode)
+    // batch: 'BATCH-...' → 'BATCH-...' (manual mode)
+    const requestedBatch =
+      it.batch && it.batch !== 'FEFO-AUTO' ? String(it.batch).trim().toUpperCase() : null;
 
-  // كل بند في الفاتورة يجب أن يكون موجوداً في الإيصال بنفس الكمية أو أقل
-  for (const invItem of items) {
-    const dnItem = dn.items.find(
-      (d) => String(d.itemId) === String(invItem.itemId) &&
-             String(d.batch) === String(invItem.batch)
-    );
-    if (!dnItem) {
+    return {
+      itemId: it.item,        // A5: `item` (وليس `itemId`)
+      quantity: Number(it.quantity),
+      batch: requestedBatch,  // ⚠️ Phase A.10: batch محدد أو null
+      _requestedUnitPrice: Number(it.unitPrice),
+    };
+  });
+
+  // bulkIssueStock: [{ itemId, issuedBatches: [...] }]
+  const bulkResult = await bulkIssueStock({
+    warehouseId,
+    lines: lines.map(({ itemId, quantity, batch }) => ({ itemId, quantity, batch })),
+  });
+
+  const issuedLots = [];
+  const invoiceItems = [];
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const result = bulkResult[i];
+    const originalItem = items[i];
+
+    const batches = Array.isArray(result?.issuedBatches) ? result.issuedBatches : [];
+
+    if (batches.length === 0) {
       throw new AppError(
-        `البند ${invItem.itemId} (دفعة ${invItem.batch}) غير موجود في إيصال التسليم`,
+        `لم يتم صرف أي دفعة للصنف ${line.itemId}.`,
         400,
-        'ITEM_NOT_IN_DELIVERY_NOTE'
+        'ISSUE_EMPTY'
       );
     }
-    if (invItem.quantity > dnItem.quantity) {
-      throw new AppError(
-        `كمية ${invItem.itemId} تتجاوز كمية الإيصال (${invItem.quantity} > ${dnItem.quantity})`,
-        400,
-        'QUANTITY_EXCEEDS_DELIVERY_NOTE'
-      );
+
+    // ⚠️ Phase A.10: لا حاجة للتحقق من _requestedBatch هنا
+    // لأن bulkIssueStock → issueStock(batch) يتحقق من:
+    //   - وجود الدفعة (BATCH_NOT_AVAILABLE)
+    //   - كفاية الكمية (BATCH_INSUFFICIENT)
+    //   - الصلاحية (BATCH_EXPIRED)
+    // التحقق المزدوج كان يسبب تناقضاً (FEFO vs manual).
+
+    // نبني invoice item لكل دفعة مصروفة
+    for (const b of batches) {
+      const qty = Number(b.quantity);
+      const unitCost = Number(b.unitCost || 0);
+      const unitPrice = line._requestedUnitPrice;
+      const lineTotal = round2(qty * unitPrice);
+
+      issuedLots.push({
+        stockId: b.stockId,
+        itemId: line.itemId,
+        batch: b.batch,
+        expiry: b.expiry,
+        quantity: qty,
+        unitCost,
+      });
+
+      invoiceItems.push({
+        item: line.itemId,
+        batch: b.batch,
+        expiry: b.expiry || null,
+        quantity: qty,
+        unit: originalItem.unit || '',
+        unitPrice,
+        total: lineTotal,
+        unitCost,
+      });
     }
   }
 
-  return dn;
+  return { issuedLots, invoiceItems };
 };
 
 /**
- * يتحقق من صحة كل بند سعراً وكمية.
- * @param {Array} items
- * @param {Object} overrides - { overrideReason, user }
+ * A2 fix: يُرجع الدفعات المصروفة عبر returnStock (× N).
  */
-const validateItemsPrices = async (items, { overrideReason, user }) => {
-  if (!Array.isArray(items) || items.length === 0) {
-    throw new AppError('الفاتورة تحتاج بنداً واحداً على الأقل', 400, 'EMPTY_ITEMS');
-  }
-
-  for (const line of items) {
-    if (!line.itemId || !line.quantity || line.quantity <= 0) {
-      throw new AppError('بند غير صحيح (itemId/quantity)', 400, 'INVALID_LINE');
+const rollbackIssuedLots = async ({ issuedLots, warehouseId, user }) => {
+  if (!Array.isArray(issuedLots) || issuedLots.length === 0) return;
+  for (const lot of issuedLots) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await returnStock({
+        itemId: lot.itemId,
+        warehouseId,
+        batch: lot.batch,
+        quantity: lot.quantity,
+        meta: { unitCost: lot.unitCost, expiry: lot.expiry, notes: 'rollback' },
+      });
+    } catch (err) {
+      logger.error(`[invoiceService] فشل Rollback للدفعة ${lot.batch}: ${err.message}`);
     }
-    if (typeof line.unitPrice !== 'number' || line.unitPrice < 0) {
-      throw new AppError('سعر البند غير صحيح', 400, 'INVALID_UNIT_PRICE');
-    }
-  }
-
-  // تقييد الأسعار (Phase 2.5) — يُمرَّر للـ priceValidationService
-  try {
-    await priceValidationService.validateInvoicePrices({
-      items,
-      user,
-      overrideReason,
-    });
-  } catch (err) {
-    // إذا كان الخطأ من نوع PRICE_BELOW_MINIMUM يحتاج override
-    throw err;
   }
 };
 
 /**
- * يتحقق من حد الائتمان للعميل (يُستخدم في finalize فقط).
+ * يتحقق من حد الائتمان للعميل.
  */
 const validateCreditLimit = async (customer, newTotal) => {
   if (!customer.creditLimit || customer.creditLimit <= 0) return;
@@ -175,6 +226,51 @@ const validateCreditLimit = async (customer, newTotal) => {
       'CREDIT_LIMIT_EXCEEDED'
     );
   }
+};
+
+/**
+ * A3 fix: يتحقق من الأسعار عبر priceValidationService بالتواقيع الصحيحة.
+ */
+const validatePricesOrThrow = async ({ items, warehouseId, overrideReason, req }) => {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new AppError('الفاتورة تحتاج بنداً واحداً على الأقل', 400, 'EMPTY_ITEMS');
+  }
+
+  // التوقيع الصحيح: { items: [{ item, batch, unitPrice, quantity }], warehouseId, req }
+  const lines = items.map((it) => ({
+    item: it.item,
+    batch: it.batch,
+    unitPrice: Number(it.unitPrice),
+    quantity: Number(it.quantity),
+  }));
+
+  const result = await priceValidationService.validateInvoicePrices({
+    items: lines,
+    warehouseId,
+    req: req || { user: null, rolePermissions: [] },  // fail-safe
+  });
+
+  // أي بند BLOCKED → رفض
+  const blocked = (result.results || []).filter((r) => r.status === 'BLOCKED');
+  if (blocked.length > 0) {
+    const first = blocked[0];
+    throw new AppError(
+      first.message || 'سعر أحد البنود غير مسموح.',
+      400,
+      'PRICE_BLOCKED'
+    );
+  }
+
+  // أي بند WARN_OVERRIDE → يحتاج overrideReason
+  if (result.needsOverride && (!overrideReason || overrideReason.trim().length < 5)) {
+    throw new AppError(
+      'أحد الأسعار أقل من الحد الموصى به. يجب إدخال سبب تجاوز (5 أحرف على الأقل).',
+      400,
+      'OVERRIDE_REASON_REQUIRED'
+    );
+  }
+
+  return result;
 };
 
 /**
@@ -192,7 +288,6 @@ const createCommissionForInvoice = async (invoice, user) => {
 
   let totalCommission = 0;
 
-  // baseCommission: نسبة أو مبلغ ثابت
   const base = commissionDoc.baseCommission || {};
   if (base.type === 'percentage') {
     totalCommission += round2((invoice.subtotal * base.value) / 100);
@@ -200,10 +295,12 @@ const createCommissionForInvoice = async (invoice, user) => {
     totalCommission += round2(base.value || 0);
   }
 
-  // tiers: بونص متدرج على أساس المبيعات
   if (Array.isArray(commissionDoc.tiers)) {
     for (const tier of commissionDoc.tiers) {
-      if (invoice.subtotal >= tier.minAmount && invoice.subtotal < (tier.maxAmount || Infinity)) {
+      if (
+        invoice.subtotal >= tier.minAmount &&
+        invoice.subtotal < (tier.maxAmount || Infinity)
+      ) {
         totalCommission += round2(tier.bonus || 0);
         break;
       }
@@ -225,31 +322,55 @@ const createCommissionForInvoice = async (invoice, user) => {
   });
 
   invoice.commission = {
+    rate: base.type === 'percentage' ? base.value : 0,
     amount: totalCommission,
     transactionId: transaction._id,
     calculatedAt: new Date(),
+    isPaid: false,
   };
   await invoice.save();
 
   return transaction;
 };
 
+/**
+ * A4 fix: يبني كائن discount المتوافق مع Invoice.js.
+ */
+const buildDiscountObject = ({ discount, computedAmount }) => {
+  if (!discount) {
+    return { type: null, value: 0, computedAmount: 0, freeItems: [] };
+  }
+  return {
+    type: discount.type || null,
+    value: Number(discount.value || 0),
+    reason: discount.reason || '',
+    approvedBy: discount.approvedBy || null,
+    approvedAt: discount.approvedAt || null,
+    computedAmount: round2(computedAmount || 0),
+    freeItems: Array.isArray(discount.freeItems) ? discount.freeItems : [],
+  };
+};
+
 /* ─────────────────────────────────────────────────────────────
- * 2) createInvoice — إنشاء فاتورة مباشرة (بلا مسودة)
- * ─────────────────────────────────────────────────────────────
+ * 2) createInvoice — إنشاء فاتورة مباشرة
+ * ───────────────────────────────────────────────────────────── */
+
+/**
+ * createInvoice — إنشاء فاتورة مباشرة (نقدي / آجل / أقساط).
+ *
  * @param {Object} params
  * @param {Object} params.body
- * @param {Object} params.user - req.user
- * @param {Object} [params.scope] - req.scope
+ * @param {Object} params.user
+ * @param {Object} [params.req] - Express req (لـ priceValidationService + logAuditEvent)
  * @returns {Promise<Object>}
  */
-export const createInvoice = async ({ body, user, scope }) => {
+export const createInvoice = async ({ body, user, req }) => {
   const {
     pharmacy,
     salesRep,
     warehouse,
     items,
-    discount = 0,
+    discount,
     taxRate = 0,
     paymentType,
     dueDate,
@@ -258,8 +379,6 @@ export const createInvoice = async ({ body, user, scope }) => {
     paymentMethod,
     overrideReason,
     cashFundId,
-    bankAccountId,
-    deliveryNoteId,
     notes,
   } = body;
 
@@ -280,51 +399,55 @@ export const createInvoice = async ({ body, user, scope }) => {
   if (paymentType === 'credit' && !dueDate) {
     throw new AppError('تاريخ الاستحقاق مطلوب للفاتورة الآجلة', 400, 'MISSING_DUE_DATE');
   }
-  if (paymentType === 'installments' && (!totalInstallments || totalInstallments < 2)) {
+  if (
+    paymentType === 'installments' &&
+    (!totalInstallments || totalInstallments < 2)
+  ) {
     throw new AppError('عدد الأقساط يجب أن يكون 2 على الأقل', 400, 'INVALID_INSTALLMENTS');
   }
 
-  // ─── 4) التحقق من الأسعار ───
-  await validateItemsPrices(items, { overrideReason, user });
+  // ─── 4) التحقق من الأسعار (A3) ───
+  await validatePricesOrThrow({ items, warehouseId: warehouse, overrideReason, req });
 
-  // ─── 5) حساب المجاميع ───
-  const { subtotal, discountAmount, taxAmount, total } = calculateTotals(items, discount, taxRate);
+  // ─── 5) صرف المخزون + بناء items الحقيقية (A1, A5, Phase A.4, Phase A.10) ───
+  let issuedLots = [];
+  let invoiceItems = [];
 
-  // ─── 6) التحقق من حد الائتمان (إن آجل/أقساط) ───
+  try {
+    const issueResult = await issueStockAndBuildItems({
+      items,
+      warehouseId: warehouse,
+      user,
+    });
+    issuedLots = issueResult.issuedLots;
+    invoiceItems = issueResult.invoiceItems;
+  } catch (err) {
+    throw new AppError(
+      `فشل صرف المخزون: ${err.message}`,
+      400,
+      'STOCK_ISSUE_FAILED'
+    );
+  }
+
+  // ─── 6) حساب المجاميع ───
+  const { subtotal, discountAmount, taxAmount, total } = calculateTotals(
+    invoiceItems,
+    discount?.computedAmount || 0,
+    taxRate
+  );
+
+  // ─── 7) التحقق من حد الائتمان ───
   if (paymentType !== 'cash') {
     await validateCreditLimit(customer, total - paidAmount);
   }
 
-  // ─── 7) فحص إيصال التسليم + خصم Stock ───
-  let issuedLots = [];
-  if (deliveryNoteId) {
-    // منع double-deduction: نتحقق فقط
-    await validateDeliveryNoteItems(deliveryNoteId, items);
-    // لا نخصم Stock — مخصوم في الإيصال
-  } else {
-    // نخصم Stock عبر FEFO
-    try {
-      issuedLots = await issueStock({
-        items: items.map((it) => ({
-          itemId: it.itemId,
-          warehouseId: warehouse,
-          quantity: it.quantity,
-          batch: it.batch, // إن محدد
-        })),
-        user,
-      });
-    } catch (err) {
-      throw new AppError(`فشل صرف المخزون: ${err.message}`, 400, 'STOCK_ISSUE_FAILED');
-    }
-  }
-
-  // ─── 8) حساب COGS ───
+  // ─── 8) COGS ───
   const costAmount = calculateIssuedCost(issuedLots);
 
   // ─── 9) توليد رقم الفاتورة ───
   const invoiceNumber = await generateInvoiceNumber();
 
-  // ─── 10) إنشاء الفاتورة ───
+  // ─── 10) إنشاء الفاتورة (A4, A5) ───
   let invoice;
   try {
     invoice = await Invoice.create({
@@ -332,58 +455,49 @@ export const createInvoice = async ({ body, user, scope }) => {
       pharmacy,
       salesRep: salesRep || null,
       warehouse,
-      items,
+      items: invoiceItems,
       subtotal,
-      discountAmount,
+      discount: buildDiscountObject({
+        discount,
+        computedAmount: discountAmount,
+      }),
       taxRate,
       taxAmount,
       total,
       paidAmount: round2(paidAmount),
+      remainingAmount: round2(total - paidAmount),
       paymentType,
       dueDate: dueDate || null,
-      totalInstallments: totalInstallments || null,
-      paymentMethod: paymentMethod || null,
-      deliveryNote: deliveryNoteId || null,
+      totalInstallments: totalInstallments || 0,
+      paymentMethod: paymentMethod || '',
       status: 'pending',
-      notes,
+      notes: notes || '',
       createdBy: user?._id || null,
-      ...(overrideReason && { overrideReason, overrideBy: user?._id }),
     });
   } catch (err) {
-    // Rollback stock
-    if (issuedLots.length > 0) {
-      try {
-        await returnStock({ issuedLots, user });
-      } catch (rbErr) {
-        logger.error(`[invoiceService] فشل Rollback المخزون: ${rbErr.message}`);
-      }
-    }
+    await rollbackIssuedLots({ issuedLots, warehouseId: warehouse, user });
     throw err;
   }
 
-  // ─── 11) إنشاء القيود المحاسبية + الحركة النقدية ───
+  // ─── 11) القيود + الحركة النقدية ───
   try {
     const remaining = round2(total - paidAmount);
 
     if (paidAmount > 0) {
-      // حركة نقدية (فقط إذا لم يكن من إيصال تسليم — الإيصال أنشأها)
-      if (!deliveryNoteId) {
-        await cashService.createCashTransaction({
-          direction: 'in',
-          amount: paidAmount,
-          method: paymentMethod || 'cash',
-          cashFundId: paymentMethod === 'cash' ? cashFundId : null,
-          bankAccountId: paymentMethod === 'bank' ? bankAccountId : null,
-          transactionDate: new Date(),
-          description: `دفعة فاتورة ${invoiceNumber}`,
-          referenceType: 'invoice',
-          referenceId: invoice._id,
-          user,
-          skipEntry: true, // سنُنشئ SALE_CASH يدوياً مع COGS
-        });
-      }
+      await cashService.createCashTransaction({
+        direction: 'in',
+        amount: paidAmount,
+        method: paymentMethod || 'cash',
+        cashFundId: paymentMethod === 'cash' ? cashFundId : null,
+        bankAccountId: null,
+        transactionDate: new Date(),
+        description: `دفعة فاتورة ${invoiceNumber}`,
+        referenceType: 'invoice',
+        referenceId: invoice._id,
+        user,
+        skipEntry: true,
+      });
 
-      // SALE_CASH + COGS entry
       await accountingService.createSaleCashEntry({
         amount: paidAmount,
         costAmount,
@@ -397,10 +511,9 @@ export const createInvoice = async ({ body, user, scope }) => {
     }
 
     if (remaining > 0 && paymentType !== 'cash') {
-      // SALE_CREDIT entry (بدون COGS لأنها سُجّلت أعلاه)
       await accountingService.createSaleCreditEntry({
         amount: remaining,
-        costAmount: paidAmount > 0 ? 0 : costAmount, // إذا لم يدفع شيء، COGS هنا
+        costAmount: paidAmount > 0 ? 0 : costAmount,
         date: new Date(),
         sourceType: 'Invoice',
         sourceId: invoice._id,
@@ -408,14 +521,13 @@ export const createInvoice = async ({ body, user, scope }) => {
         description: `بيع آجل — ${invoiceNumber}`,
       });
 
-      // تحديث رصيد العميل
       await Customer.updateOne(
         { _id: pharmacy },
         { $inc: { currentBalance: remaining } }
       );
     }
 
-    // إذا لم يدفع شيئاً وكان نقدياً (paidAmount=0, paymentType=cash) — نعتبرها آجلة
+    // نقدي بلا دفع → نعتبرها آجلة
     if (paidAmount === 0 && paymentType === 'cash') {
       await accountingService.createSaleCreditEntry({
         amount: total,
@@ -426,18 +538,16 @@ export const createInvoice = async ({ body, user, scope }) => {
         user,
         description: `بيع (لم يُدفع) — ${invoiceNumber}`,
       });
+
       await Customer.updateOne(
         { _id: pharmacy },
         { $inc: { currentBalance: total } }
       );
     }
   } catch (err) {
-    // Rollback: حذف الفاتورة + إرجاع Stock
     try {
       await Invoice.deleteOne({ _id: invoice._id });
-      if (issuedLots.length > 0) {
-        await returnStock({ issuedLots, user });
-      }
+      await rollbackIssuedLots({ issuedLots, warehouseId: warehouse, user });
     } catch (rbErr) {
       logger.error(`[invoiceService] Rollback فشل: ${rbErr.message}`);
     }
@@ -447,7 +557,7 @@ export const createInvoice = async ({ body, user, scope }) => {
   // ─── 12) تحديث الحالة ───
   if (paidAmount >= total - 0.01) invoice.status = 'paid';
   else if (paidAmount > 0) invoice.status = 'partial';
-  else if (paymentType === 'cash') invoice.status = 'pending';
+  else invoice.status = 'pending';
   await invoice.save();
 
   // ─── 13) Commission ───
@@ -455,7 +565,7 @@ export const createInvoice = async ({ body, user, scope }) => {
 
   // ─── 14) Audit ───
   await logAuditEvent({
-    req: { user },
+    req: req || { user },
     action: AUDIT_ACTIONS.CREATE,
     resource: 'Invoice',
     resourceId: invoice._id,
@@ -473,12 +583,10 @@ export const createInvoice = async ({ body, user, scope }) => {
 };
 
 /* ─────────────────────────────────────────────────────────────
- * 3) createDraft — إنشاء مسودة (Phase 2.5)
- * ─────────────────────────────────────────────────────────────
- * لا حركة نقدية، لا قيد، لا stock، لا credit check.
- */
-export const createDraft = async ({ body, user, scope }) => {
-  const { pharmacy, salesRep, warehouse, items, discount = 0, taxRate = 0, notes } = body;
+ * 3) createDraft — مسودة
+ * ───────────────────────────────────────────────────────────── */
+export const createDraft = async ({ body, user }) => {
+  const { pharmacy, salesRep, warehouse, items, discount, taxRate = 0, notes } = body;
 
   if (!pharmacy) throw new AppError('الصيدلية مطلوبة', 400, 'MISSING_PHARMACY');
   const customer = await Customer.findById(pharmacy);
@@ -490,7 +598,22 @@ export const createDraft = async ({ body, user, scope }) => {
     throw new AppError('المسودة تحتاج بنداً واحداً على الأقل', 400, 'EMPTY_ITEMS');
   }
 
-  const { subtotal, discountAmount, taxAmount, total } = calculateTotals(items, discount, taxRate);
+  const draftItems = items.map((it) => ({
+    item: it.item || it.itemId || it.item?._id,
+    batch: it.batch,
+    expiry: it.expiry || null,
+    quantity: Number(it.quantity),
+    unit: it.unit || '',
+    unitPrice: Number(it.unitPrice),
+    total: Number(it.total) || round2(Number(it.quantity) * Number(it.unitPrice)),
+    unitCost: Number(it.unitCost || 0),
+  }));
+
+  const { subtotal, discountAmount, taxAmount, total } = calculateTotals(
+    draftItems,
+    discount?.computedAmount || 0,
+    taxRate
+  );
   const invoiceNumber = await generateInvoiceNumber();
 
   const draft = await Invoice.create({
@@ -498,16 +621,17 @@ export const createDraft = async ({ body, user, scope }) => {
     pharmacy,
     salesRep: salesRep || null,
     warehouse,
-    items,
+    items: draftItems,
     subtotal,
-    discountAmount,
+    discount: buildDiscountObject({ discount, computedAmount: discountAmount }),
     taxRate,
     taxAmount,
     total,
     paidAmount: 0,
+    remainingAmount: total,
     paymentType: null,
     status: 'draft',
-    notes,
+    notes: notes || '',
     createdBy: user?._id || null,
   });
 
@@ -526,10 +650,8 @@ export const createDraft = async ({ body, user, scope }) => {
 
 /* ─────────────────────────────────────────────────────────────
  * 4) updateDraft — تعديل مسودة
- * ─────────────────────────────────────────────────────────────
- * pharmacy ثابت — لا يمكن تغييره.
- */
-export const updateDraft = async ({ invoiceId, body, user, scope }) => {
+ * ───────────────────────────────────────────────────────────── */
+export const updateDraft = async ({ invoiceId, body, user }) => {
   const invoice = await Invoice.findById(invoiceId);
   if (!invoice) throw new AppError('الفاتورة غير موجودة', 404, 'INVOICE_NOT_FOUND');
   if (invoice.status !== 'draft') {
@@ -538,7 +660,6 @@ export const updateDraft = async ({ invoiceId, body, user, scope }) => {
 
   const { items, discount, taxRate, notes, salesRep, warehouse } = body;
 
-  // pharmacy ثابت — نرفض تغييره
   if (body.pharmacy && String(body.pharmacy) !== String(invoice.pharmacy)) {
     throw new AppError('لا يمكن تغيير الصيدلية بعد الإنشاء', 400, 'PHARMACY_IMMUTABLE');
   }
@@ -551,13 +672,31 @@ export const updateDraft = async ({ invoiceId, body, user, scope }) => {
     if (!Array.isArray(items) || items.length === 0) {
       throw new AppError('المسودة تحتاج بنداً واحداً على الأقل', 400, 'EMPTY_ITEMS');
     }
-    invoice.items = items;
-    const { subtotal, discountAmount, taxAmount, total } = calculateTotals(items, discount, taxRate);
+    const draftItems = items.map((it) => ({
+      item: it.item || it.itemId || it.item?._id,
+      batch: it.batch,
+      expiry: it.expiry || null,
+      quantity: Number(it.quantity),
+      unit: it.unit || '',
+      unitPrice: Number(it.unitPrice),
+      total: Number(it.total) || round2(Number(it.quantity) * Number(it.unitPrice)),
+      unitCost: Number(it.unitCost || 0),
+    }));
+    invoice.items = draftItems;
+    const { subtotal, discountAmount, taxAmount, total } = calculateTotals(
+      draftItems,
+      discount?.computedAmount || 0,
+      taxRate
+    );
     invoice.subtotal = subtotal;
-    invoice.discountAmount = discountAmount;
+    invoice.discount = buildDiscountObject({
+      discount,
+      computedAmount: discountAmount,
+    });
     invoice.taxRate = taxRate || 0;
     invoice.taxAmount = taxAmount;
     invoice.total = total;
+    invoice.remainingAmount = total;
   }
 
   await invoice.save();
@@ -576,17 +715,9 @@ export const updateDraft = async ({ invoiceId, body, user, scope }) => {
 };
 
 /* ─────────────────────────────────────────────────────────────
- * 5) finalizeInvoice — اعتماد مسودة (Phase 2.5 + 3)
- * ─────────────────────────────────────────────────────────────
- * هذا هو الحدث الذي "يفعّل" كل شيء:
- *  - فحص الائتمان
- *  - خصم Stock (إلا إذا deliveryNote)
- *  - CashTransaction
- *  - AccountingEntry
- *  - Commission
- *  - تحديث رصيد العميل
- */
-export const finalizeInvoice = async ({ invoiceId, body, user, scope }) => {
+ * 5) finalizeInvoice — اعتماد مسودة (A6)
+ * ───────────────────────────────────────────────────────────── */
+export const finalizeInvoice = async ({ invoiceId, body, user, req }) => {
   const invoice = await Invoice.findById(invoiceId);
   if (!invoice) throw new AppError('الفاتورة غير موجودة', 404, 'INVOICE_NOT_FOUND');
   if (invoice.status !== 'draft') {
@@ -601,7 +732,6 @@ export const finalizeInvoice = async ({ invoiceId, body, user, scope }) => {
     paymentMethod,
     overrideReason,
     cashFundId,
-    bankAccountId,
   } = body;
 
   // ─── 1) التحقق ───
@@ -611,47 +741,50 @@ export const finalizeInvoice = async ({ invoiceId, body, user, scope }) => {
   if (paymentType === 'credit' && !dueDate) {
     throw new AppError('تاريخ الاستحقاق مطلوب', 400, 'MISSING_DUE_DATE');
   }
-  if (paymentType === 'installments' && (!totalInstallments || totalInstallments < 2)) {
+  if (
+    paymentType === 'installments' &&
+    (!totalInstallments || totalInstallments < 2)
+  ) {
     throw new AppError('عدد الأقساط يجب أن يكون 2 على الأقل', 400, 'INVALID_INSTALLMENTS');
   }
 
-  // ─── 2) التحقق من حد الائتمان ───
+  // ─── 2) التحقق من الائتمان ───
   const customer = await Customer.findById(invoice.pharmacy);
   if (paymentType !== 'cash') {
     await validateCreditLimit(customer, invoice.total - paidAmount);
   }
 
-  // ─── 3) التحقق من الأسعار (مع overrideReason إن وُجد) ───
-  await validateItemsPrices(invoice.items, { overrideReason, user });
+  // ─── 3) التحقق من الأسعار (A3) ───
+  await validatePricesOrThrow({
+    items: invoice.items,
+    warehouseId: invoice.warehouse,
+    overrideReason,
+    req,
+  });
 
-  // ─── 4) خصم Stock (إلا إذا deliveryNote) ───
-  let issuedLots = [];
-  if (invoice.deliveryNote) {
-    await validateDeliveryNoteItems(invoice.deliveryNote, invoice.items);
-  } else {
-    try {
-      issuedLots = await issueStock({
-        items: invoice.items.map((it) => ({
-          itemId: it.itemId,
-          warehouseId: invoice.warehouse,
-          quantity: it.quantity,
-          batch: it.batch,
-        })),
-        user,
-      });
-    } catch (err) {
-      throw new AppError(`فشل صرف المخزون: ${err.message}`, 400, 'STOCK_ISSUE_FAILED');
-    }
-  }
+  // ─── 4) صرف المخزون (A6 — نفس A1 + Phase A.10) ───
+  const { issuedLots, invoiceItems } = await issueStockAndBuildItems({
+    items: invoice.items.map((it) => ({
+      item: it.item,
+      batch: it.batch,
+      quantity: it.quantity,
+      unitPrice: it.unitPrice,
+      unitCost: it.unitCost,
+    })),
+    warehouseId: invoice.warehouse,
+    user,
+  });
 
   const costAmount = calculateIssuedCost(issuedLots);
 
   // ─── 5) تحديث الفاتورة ───
+  invoice.items = invoiceItems;
   invoice.paymentType = paymentType;
   invoice.dueDate = dueDate || null;
-  invoice.totalInstallments = totalInstallments || null;
+  invoice.totalInstallments = totalInstallments || 0;
   invoice.paidAmount = round2(paidAmount);
-  invoice.paymentMethod = paymentMethod || null;
+  invoice.remainingAmount = round2(invoice.total - paidAmount);
+  invoice.paymentMethod = paymentMethod || '';
   invoice.finalizedBy = user?._id || null;
   invoice.finalizedAt = new Date();
   if (overrideReason) {
@@ -665,21 +798,20 @@ export const finalizeInvoice = async ({ invoiceId, body, user, scope }) => {
     const remaining = round2(invoice.total - paidAmount);
 
     if (paidAmount > 0) {
-      if (!invoice.deliveryNote) {
-        await cashService.createCashTransaction({
-          direction: 'in',
-          amount: paidAmount,
-          method: paymentMethod || 'cash',
-          cashFundId: paymentMethod === 'cash' ? cashFundId : null,
-          bankAccountId: paymentMethod === 'bank' ? bankAccountId : null,
-          transactionDate: new Date(),
-          description: `دفعة فاتورة ${invoice.invoiceNumber}`,
-          referenceType: 'invoice',
-          referenceId: invoice._id,
-          user,
-          skipEntry: true,
-        });
-      }
+      await cashService.createCashTransaction({
+        direction: 'in',
+        amount: paidAmount,
+        method: paymentMethod || 'cash',
+        cashFundId: paymentMethod === 'cash' ? cashFundId : null,
+        bankAccountId: null,
+        transactionDate: new Date(),
+        description: `دفعة فاتورة ${invoice.invoiceNumber}`,
+        referenceType: 'invoice',
+        referenceId: invoice._id,
+        user,
+        skipEntry: true,
+      });
+
       await accountingService.createSaleCashEntry({
         amount: paidAmount,
         costAmount,
@@ -702,6 +834,7 @@ export const finalizeInvoice = async ({ invoiceId, body, user, scope }) => {
         user,
         description: `بيع آجل — ${invoice.invoiceNumber}`,
       });
+
       await Customer.updateOne(
         { _id: invoice.pharmacy },
         { $inc: { currentBalance: remaining } }
@@ -718,22 +851,24 @@ export const finalizeInvoice = async ({ invoiceId, body, user, scope }) => {
         user,
         description: `بيع (لم يُدفع) — ${invoice.invoiceNumber}`,
       });
+
       await Customer.updateOne(
         { _id: invoice.pharmacy },
         { $inc: { currentBalance: invoice.total } }
       );
     }
   } catch (err) {
-    // Rollback: نرجع الحالة draft + نرجع Stock
     invoice.status = 'draft';
     await invoice.save();
-    if (issuedLots.length > 0) {
-      try { await returnStock({ issuedLots, user }); } catch (_) {}
-    }
+    await rollbackIssuedLots({
+      issuedLots,
+      warehouseId: invoice.warehouse,
+      user,
+    });
     throw err;
   }
 
-  // ─── 7) تحديث الحالة ───
+  // ─── 7) الحالة ───
   if (paidAmount >= invoice.total - 0.01) invoice.status = 'paid';
   else if (paidAmount > 0) invoice.status = 'partial';
   else invoice.status = 'pending';
@@ -758,16 +893,13 @@ export const finalizeInvoice = async ({ invoiceId, body, user, scope }) => {
 
 /* ─────────────────────────────────────────────────────────────
  * 6) registerPayment — دفعة على فاتورة قائمة
- * ─────────────────────────────────────────────────────────────
- */
+ * ───────────────────────────────────────────────────────────── */
 export const registerPayment = async ({
   invoiceId,
   amount,
   paymentMethod,
   cashFundId,
-  bankAccountId,
   user,
-  scope,
 }) => {
   const invoice = await Invoice.findById(invoiceId);
   if (!invoice) throw new AppError('الفاتورة غير موجودة', 404, 'INVOICE_NOT_FOUND');
@@ -790,13 +922,13 @@ export const registerPayment = async ({
     );
   }
 
-  // ─── 1) CashTransaction + CUSTOMER_PAYMENT entry ───
+  // ─── 1) CashTransaction + CUSTOMER_PAYMENT ───
   await cashService.createCashTransaction({
     direction: 'in',
     amount,
     method: paymentMethod || 'cash',
     cashFundId: paymentMethod === 'cash' ? cashFundId : null,
-    bankAccountId: paymentMethod === 'bank' ? bankAccountId : null,
+    bankAccountId: null,
     transactionDate: new Date(),
     description: `دفعة على فاتورة ${invoice.invoiceNumber}`,
     referenceType: 'invoice',
@@ -812,15 +944,17 @@ export const registerPayment = async ({
     sourceType: 'Invoice',
     sourceId: invoice._id,
     cashFundId: paymentMethod === 'cash' ? cashFundId : null,
-    bankAccountId: paymentMethod === 'bank' ? bankAccountId : null,
+    bankAccountId: null,
     user,
     description: `تحصيل دفعة — ${invoice.invoiceNumber}`,
   });
 
   // ─── 2) تحديث الفاتورة ───
   invoice.paidAmount = round2(invoice.paidAmount + amount);
+  invoice.remainingAmount = round2(invoice.total - invoice.paidAmount);
   if (invoice.paidAmount >= invoice.total - 0.01) {
     invoice.status = 'paid';
+    invoice.paidAt = new Date();
   } else {
     invoice.status = 'partial';
   }
@@ -846,13 +980,9 @@ export const registerPayment = async ({
 };
 
 /* ─────────────────────────────────────────────────────────────
- * 7) cancelInvoice — إلغاء فاتورة
- * ─────────────────────────────────────────────────────────────
- * - إذا كانت مدفوعة (paidAmount > 0): منع الإلغاء (استخدم مرتجع بدلاً)
- * - إذا كانت draft: حذف بسيط
- * - إذا كانت pending/partial: عكس Stock + عكس القيود
- */
-export const cancelInvoice = async ({ invoiceId, reason, user, scope }) => {
+ * 7) cancelInvoice — إلغاء فاتورة (A7)
+ * ───────────────────────────────────────────────────────────── */
+export const cancelInvoice = async ({ invoiceId, reason, user }) => {
   const invoice = await Invoice.findById(invoiceId);
   if (!invoice) throw new AppError('الفاتورة غير موجودة', 404, 'INVOICE_NOT_FOUND');
   if (invoice.status === 'cancelled') {
@@ -866,26 +996,29 @@ export const cancelInvoice = async ({ invoiceId, reason, user, scope }) => {
     );
   }
 
-  // ─── 1) عكس Stock (إلا إذا deliveryNote) ───
-  if (!invoice.deliveryNote && invoice.items?.length > 0) {
-    try {
-      // نرجع المخزون عبر returnStock (upsert)
-      await returnStock({
-        issuedLots: invoice.items.map((it) => ({
-          itemId: it.itemId,
+  // ─── 1) عكس Stock (A7) ───
+  if (invoice.items?.length > 0) {
+    for (const it of invoice.items) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await returnStock({
+          itemId: it.item,
           warehouseId: invoice.warehouse,
           batch: it.batch,
           quantity: it.quantity,
-          unitCost: it.unitCost || 0,
-        })),
-        user,
-      });
-    } catch (err) {
-      logger.warn(`[invoiceService] فشل إرجاع Stock: ${err.message}`);
+          meta: {
+            unitCost: it.unitCost || 0,
+            expiry: it.expiry,
+            notes: `cancel: ${invoice.invoiceNumber}`,
+          },
+        });
+      } catch (err) {
+        logger.warn(`[invoiceService] فشل إرجاع Stock (${it.batch}): ${err.message}`);
+      }
     }
   }
 
-  // ─── 2) عكس رصيد العميل (إن آجل/أقساط) ───
+  // ─── 2) عكس رصيد العميل ───
   const remaining = round2(invoice.total - invoice.paidAmount);
   if (remaining > 0 && invoice.paymentType !== 'cash') {
     await Customer.updateOne(
@@ -901,6 +1034,7 @@ export const cancelInvoice = async ({ invoiceId, reason, user, scope }) => {
       sourceId: invoice._id,
     });
     for (const entry of entries) {
+      // eslint-disable-next-line no-await-in-loop
       await accountingService.reverseEntry({
         entryId: entry._id,
         user,
@@ -911,7 +1045,7 @@ export const cancelInvoice = async ({ invoiceId, reason, user, scope }) => {
     logger.warn(`[invoiceService] فشل عكس قيود الفاتورة: ${err.message}`);
   }
 
-  // ─── 4) تحديث الحالة ───
+  // ─── 4) الحالة ───
   invoice.status = 'cancelled';
   invoice.cancelledAt = new Date();
   invoice.cancelledBy = user?._id || null;

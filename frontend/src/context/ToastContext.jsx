@@ -2,10 +2,10 @@
  * @file ToastContext.jsx
  * @description Context API لإدارة الإشعارات (Toasts)
  *
- * لماذا هذا الملف:
- * - إدارة موحّدة للإشعارات في كل التطبيق.
- * - إضافة/إزالة الإشعارات من أي مكان.
- * - دعم 4 أنواع (success, error, warning, info).
+ * ⚠️ Phase A (2026-11-07):
+ * - أُضيف `showToast(message, type)` كواجهة موحّدة للتوافق
+ *   مع كل المكونات التي تستخدم `useToast().showToast`.
+ * - `showToast` يُغلّف `success/error/warning/info` الداخلية.
  */
 
 import { createContext, useCallback, useMemo, useState } from 'react';
@@ -31,12 +31,10 @@ function generateToastId() {
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
 
-  // ✅ إزالة إشعار
   const removeToast = useCallback((id) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   }, []);
 
-  // ✅ إضافة إشعار (عام)
   const addToast = useCallback(
     ({ type = 'info', message, title, duration = 4000 }) => {
       const id = generateToastId();
@@ -44,7 +42,6 @@ export function ToastProvider({ children }) {
 
       setToasts((prev) => [...prev, newToast]);
 
-      // ✅ إزالة تلقائية بعد المدة
       if (duration > 0) {
         setTimeout(() => {
           removeToast(id);
@@ -56,7 +53,6 @@ export function ToastProvider({ children }) {
     [removeToast]
   );
 
-  // ✅ دوال مختصرة لكل نوع
   const success = useCallback(
     (message, options = {}) => addToast({ type: 'success', message, ...options }),
     [addToast]
@@ -77,7 +73,30 @@ export function ToastProvider({ children }) {
     [addToast]
   );
 
-  // ✅ إزالة كل الإشعارات
+  /**
+   * ⚠️ Phase A: واجهة موحّدة للتوافق مع المكونات التي تستخدم `showToast`.
+   * @param {string} message
+   * @param {'success'|'error'|'warning'|'info'} [type='info']
+   * @param {Object} [options]
+   */
+  const showToast = useCallback(
+    (message, type = 'info', options = {}) => {
+      if (!message) return null;
+      switch (type) {
+        case 'success':
+          return success(message, options);
+        case 'error':
+          return error(message, options);
+        case 'warning':
+          return warning(message, options);
+        case 'info':
+        default:
+          return info(message, options);
+      }
+    },
+    [success, error, warning, info]
+  );
+
   const clearAll = useCallback(() => {
     setToasts([]);
   }, []);
@@ -91,9 +110,10 @@ export function ToastProvider({ children }) {
       error,
       warning,
       info,
+      showToast,
       clearAll,
     }),
-    [toasts, addToast, removeToast, success, error, warning, info, clearAll]
+    [toasts, addToast, removeToast, success, error, warning, info, showToast, clearAll]
   );
 
   return <ToastContext.Provider value={value}>{children}</ToastContext.Provider>;

@@ -1,17 +1,23 @@
 /**
  * @file Role.js
  * @description
- * نموذج الدور (Role) — 5 أدوار + 77 صلاحية دقيقة.
+ * نموذج الدور (Role) — 5 أدوار + 72 صلاحية دقيقة (بعد 🅲).
  *
- * لماذا هذا الملف؟
- * - نُطبّق RBAC دقيقاً: لكل دور ما يخصه فقط.
- * - الصلاحيات بصيغة resource.action (مثل: invoices.create).
- * - نستخدم الأدوار عبر requirePermissions middleware.
+ * ✅ 🅱 (2026-11-08):
+ * - حُذفت delivery_notes.* (4 صلاحيات) من ALL_PERMISSIONS.
+ * - حُذفت delivery_notes.* من DEFAULT_ROLES:
+ *   - accountant: 1 (view)
+ *   - sales_rep: 4 (view, create, update, mark_delivered)
+ *   - pharmacy: 1 (view)
+ *
+ * ✅ 🅲 (2026-11-08):
+ * - حُذفت finance.checks.manage من ALL_PERMISSIONS.
+ * - حُذفت finance.checks.manage من DEFAULT_ROLES.accountant.
+ * - Check أُلغي.
  *
  * الصلاحيات المالية (Phase 3):
- *  - finance.view               → عرض الصناديق والبنك والشيكات والقيود
+ *  - finance.view               → عرض الصناديق والبنك والقيود
  *  - finance.manage             → إدارة الصناديق والبنك (CRUD)
- *  - finance.checks.manage      → إدارة الشيكات (تسجيل، صرف، ارتداد، إلغاء)
  *  - finance.entries.view       → عرض القيود المحاسبية
  *  - finance.entries.manage     → إنشاء قيود يدوية (نادر)
  *  - finance.transactions.view  → عرض الحركات النقدية
@@ -22,7 +28,7 @@ import mongoose from 'mongoose';
 const { Schema, model } = mongoose;
 
 /**
- * جميع الصلاحيات المعروفة في النظام (77 صلاحية).
+ * جميع الصلاحيات المعروفة في النظام (72 صلاحية — بعد 🅲).
  * تُستخدم في pre-save للتحقق من صحة الصلاحيات.
  */
 export const ALL_PERMISSIONS = Object.freeze([
@@ -53,8 +59,7 @@ export const ALL_PERMISSIONS = Object.freeze([
   // ─── الفواتير (5) ───
   'invoices.view', 'invoices.create', 'invoices.update', 'invoices.cancel', 'invoices.override_price_limit',
 
-  // ─── إيصالات التسليم (4) ───
-  'delivery_notes.view', 'delivery_notes.create', 'delivery_notes.update', 'delivery_notes.mark_delivered',
+  // ⚠️ 🅱: حُذفت delivery_notes.* (4 صلاحيات)
 
   // ─── مرتجعات العملاء (4) ───
   'customer_returns.view', 'customer_returns.create', 'customer_returns.approve', 'customer_returns.reject',
@@ -78,10 +83,10 @@ export const ALL_PERMISSIONS = Object.freeze([
   // ─── التقارير (2) — Phase 4 ───
   'reports.view', 'reports.export',
 
-  // ─── المالية (6) — Phase 3 ───
+  // ─── المالية (5) — Phase 3 ───
+  // ⚠️ 🅲: حُذف finance.checks.manage
   'finance.view',
   'finance.manage',
-  'finance.checks.manage',
   'finance.entries.view',
   'finance.entries.manage',
   'finance.transactions.view',
@@ -147,9 +152,6 @@ const roleSchema = new Schema(
 );
 
 /**
- 
-
-/**
  * التحقق من أن كل الصلاحيات معروفة.
  */
 roleSchema.pre('save', function validatePermissions(next) {
@@ -193,6 +195,9 @@ roleSchema.methods.hasAllPermissions = function hasAllPermissions(...perms) {
 /**
  * قائمة الأدوار الافتراضية + صلاحياتها.
  * تُستخدم في seed.js.
+ *
+ * ✅ 🅱: حُذفت delivery_notes.* من accountant/sales_rep/pharmacy.
+ * ✅ 🅲: حُذف finance.checks.manage من accountant.
  */
 export const DEFAULT_ROLES = Object.freeze([
   {
@@ -222,7 +227,7 @@ export const DEFAULT_ROLES = Object.freeze([
   {
     code: 'accountant',
     name: 'محاسب',
-    description: 'المالية + الفواتير + الشيكات + تجاوز الأسعار',
+    description: 'المالية + الفواتير + تجاوز الأسعار',
     isSystem: true,
     permissions: [
       'categories.view',
@@ -232,7 +237,7 @@ export const DEFAULT_ROLES = Object.freeze([
       'customers.view', 'customers.update',
       'stocks.view',
       'invoices.view', 'invoices.create', 'invoices.update', 'invoices.cancel', 'invoices.override_price_limit',
-      'delivery_notes.view',
+      // ⚠️ 🅱: حُذف delivery_notes.view
       'customer_returns.view', 'customer_returns.approve', 'customer_returns.reject',
       'supplier_returns.view',
       'purchase_receipts.view',
@@ -243,13 +248,13 @@ export const DEFAULT_ROLES = Object.freeze([
       // ─── المالية (Phase 3) ───
       'finance.view',
       'finance.manage',
-      'finance.checks.manage',
+      // ⚠️ 🅲: حُذف finance.checks.manage
       'finance.entries.view',
       'finance.transactions.view',
       // ⚠️ بدون finance.entries.manage — القيود تلقائية فقط
     ],
   },
-    {
+  {
     code: 'hr_manager',
     name: 'مدير موارد بشرية',
     description: 'إدارة الموظفين والمستخدمين فقط (بدون مالية، بدون مخزون، بدون مبيعات)',
@@ -276,7 +281,7 @@ export const DEFAULT_ROLES = Object.freeze([
       'customers.view',
       'stocks.view',
       'invoices.view', 'invoices.create', 'invoices.update',
-      'delivery_notes.view', 'delivery_notes.create', 'delivery_notes.update', 'delivery_notes.mark_delivered',
+      // ⚠️ 🅱: حُذفت delivery_notes.* (4 صلاحيات)
       'customer_returns.view', 'customer_returns.create',
       'notifications.view',
     ],
@@ -284,12 +289,12 @@ export const DEFAULT_ROLES = Object.freeze([
   {
     code: 'pharmacy',
     name: 'صيدلية',
-    description: 'عرض فقط (فواتيره + إيصالاته)',
+    description: 'عرض فقط (فواتيره)',
     isSystem: true,
     permissions: [
       'items.view',
       'invoices.view',
-      'delivery_notes.view',
+      // ⚠️ 🅱: حُذف delivery_notes.view
       'customer_returns.view',
       'notifications.view',
     ],

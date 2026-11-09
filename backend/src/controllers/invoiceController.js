@@ -3,6 +3,12 @@
  * @description
  * Controllers للفواتير — تمرير cashFundId و bankAccountId للخدمة.
  * المنطق كله في invoiceService.
+ *
+ * ⚠️ Phase A.5 (2026-11-07):
+ * - نمرّر `req` كاملاً لـ invoiceService (لـ logAuditEvent + priceValidationService).
+ * - نستخدم req.validatedQuery للقوائم.
+ * - نُصلح populate('salesRep', 'fullName') → 'name'.
+ * - نُصلح getMyInvoices → req.user.linkedEntity?.id.
  */
 
 import Invoice from '../models/Invoice.js';
@@ -14,7 +20,18 @@ import { AppError } from '../middlewares/errorMiddleware.js';
  */
 export const listInvoices = async (req, res, next) => {
   try {
-    const { page = 1, limit = 20, status, pharmacy, salesRep, from, to, search } = req.query;
+    // ⚠️ Phase A.5: req.validatedQuery (number) بدل req.query (string)
+    const q = req.validatedQuery || req.query;
+    const {
+      page = 1,
+      limit = 20,
+      status,
+      pharmacy,
+      salesRep,
+      from,
+      to,
+      search,
+    } = q;
 
     const filter = {};
     if (status && status !== 'all') filter.status = status;
@@ -38,14 +55,17 @@ export const listInvoices = async (req, res, next) => {
       filter.pharmacy = req.scope.customerId;
     }
 
-    const skip = (Number(page) - 1) * Number(limit);
+    const pageNum = Number(page) || 1;
+    const limitNum = Number(limit) || 20;
+    const skip = (pageNum - 1) * limitNum;
+
     const [invoices, total] = await Promise.all([
       Invoice.find(filter)
         .populate('pharmacy', 'name phone code')
-        .populate('salesRep', 'fullName email')
+        .populate('salesRep', 'name email')   // ⚠️ 'name' بدل 'fullName'
         .sort({ invoiceDate: -1, createdAt: -1 })
         .skip(skip)
-        .limit(Number(limit))
+        .limit(limitNum)
         .lean(),
       Invoice.countDocuments(filter),
     ]);
@@ -54,10 +74,10 @@ export const listInvoices = async (req, res, next) => {
       success: true,
       data: invoices,
       pagination: {
-        page: Number(page),
-        limit: Number(limit),
+        page: pageNum,
+        limit: limitNum,
         total,
-        totalPages: Math.ceil(total / Number(limit)),
+        totalPages: Math.ceil(total / limitNum),
       },
     });
   } catch (error) {
@@ -74,9 +94,22 @@ export const getMyInvoices = async (req, res, next) => {
     if (req.user.role === 'sales_rep') {
       filter.salesRep = req.user._id;
     } else if (req.user.role === 'pharmacy') {
-      filter.pharmacy = req.user.customerId;
+      // ⚠️ Phase A.5: req.user.linkedEntity?.id بدل req.user.customerId
+      const customerId = req.user.linkedEntity?.id;
+      if (!customerId) {
+        throw new AppError(
+          'حساب الصيدلية غير مربوط بعميل.',
+          403,
+          'PHARMACY_NOT_LINKED'
+        );
+      }
+      filter.pharmacy = customerId;
     } else {
-      throw new AppError('هذا المسار للمندوبين والصيدليات فقط', 403, 'FORBIDDEN');
+      throw new AppError(
+        'هذا المسار للمندوبين والصيدليات فقط',
+        403,
+        'FORBIDDEN'
+      );
     }
 
     const invoices = await Invoice.find(filter)
@@ -98,19 +131,25 @@ export const getInvoice = async (req, res, next) => {
   try {
     const invoice = await Invoice.findById(req.params.id)
       .populate('pharmacy', 'name phone code address')
-      .populate('salesRep', 'fullName email')
+      .populate('salesRep', 'name email')       // ⚠️ 'name'
       .populate('warehouse', 'name code')
-      .populate('finalizedBy', 'fullName');
+      .populate('finalizedBy', 'name');         // ⚠️ 'name'
 
     if (!invoice) {
       throw new AppError('الفاتورة غير موجودة', 404, 'INVOICE_NOT_FOUND');
     }
 
     // Scope
-    if (req.scope?.salesRepId && String(invoice.salesRep?._id) !== String(req.scope.salesRepId)) {
+    if (
+      req.scope?.salesRepId &&
+      String(invoice.salesRep?._id) !== String(req.scope.salesRepId)
+    ) {
       throw new AppError('غير مصرح', 403, 'FORBIDDEN');
     }
-    if (req.scope?.customerId && String(invoice.pharmacy?._id) !== String(req.scope.customerId)) {
+    if (
+      req.scope?.customerId &&
+      String(invoice.pharmacy?._id) !== String(req.scope.customerId)
+    ) {
       throw new AppError('غير مصرح', 403, 'FORBIDDEN');
     }
 
@@ -123,6 +162,8 @@ export const getInvoice = async (req, res, next) => {
 /**
  * POST /api/invoices
  * إنشاء فاتورة مباشرة.
+ *
+ * ⚠️ Phase A.5: نمرّر req كاملاً (لـ priceValidationService + logAuditEvent).
  */
 export const createInvoice = async (req, res, next) => {
   try {
@@ -133,7 +174,7 @@ export const createInvoice = async (req, res, next) => {
         bankAccountId: req.body.bankAccountId || null,
       },
       user: req.user,
-      scope: req.scope,
+      req,                                        // ⚠️ req كامل
     });
 
     res.status(201).json({
@@ -155,7 +196,7 @@ export const createDraft = async (req, res, next) => {
     const draft = await invoiceService.createDraft({
       body: req.body,
       user: req.user,
-      scope: req.scope,
+      req,                                        // ⚠️ req كامل
     });
 
     res.status(201).json({
@@ -178,7 +219,7 @@ export const updateDraft = async (req, res, next) => {
       invoiceId: req.params.id,
       body: req.body,
       user: req.user,
-      scope: req.scope,
+      req,                                        // ⚠️ req كامل
     });
 
     res.status(200).json({
@@ -194,6 +235,8 @@ export const updateDraft = async (req, res, next) => {
 /**
  * POST /api/invoices/:id/finalize
  * اعتماد مسودة.
+ *
+ * ⚠️ Phase A.5: نمرّر req كاملاً.
  */
 export const finalizeInvoice = async (req, res, next) => {
   try {
@@ -205,7 +248,7 @@ export const finalizeInvoice = async (req, res, next) => {
         bankAccountId: req.body.bankAccountId || null,
       },
       user: req.user,
-      scope: req.scope,
+      req,                                        // ⚠️ req كامل
     });
 
     res.status(200).json({
@@ -225,7 +268,9 @@ export const finalizeInvoice = async (req, res, next) => {
 export const updateInvoice = async (req, res, next) => {
   try {
     const invoice = await Invoice.findById(req.params.id);
-    if (!invoice) throw new AppError('الفاتورة غير موجودة', 404, 'INVOICE_NOT_FOUND');
+    if (!invoice) {
+      throw new AppError('الفاتورة غير موجودة', 404, 'INVOICE_NOT_FOUND');
+    }
     if (invoice.status !== 'draft') {
       throw new AppError('يمكن تعديل المسودات فقط', 400, 'NOT_A_DRAFT');
     }
@@ -255,7 +300,7 @@ export const registerPayment = async (req, res, next) => {
       cashFundId: cashFundId || null,
       bankAccountId: bankAccountId || null,
       user: req.user,
-      scope: req.scope,
+      req,                                        // ⚠️ req كامل
     });
 
     res.status(200).json({
@@ -274,12 +319,14 @@ export const registerPayment = async (req, res, next) => {
  */
 export const cancelInvoice = async (req, res, next) => {
   try {
-    const { reason } = req.body;
+    const { cancelReason, reason } = req.body;
+    const finalReason = cancelReason || reason || '';
+
     const invoice = await invoiceService.cancelInvoice({
       invoiceId: req.params.id,
-      reason,
+      reason: finalReason,
       user: req.user,
-      scope: req.scope,
+      req,                                        // ⚠️ req كامل
     });
 
     res.status(200).json({

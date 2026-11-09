@@ -2,6 +2,11 @@
  * @file vite.config.js
  * @description إعدادات Vite + React + PWA + Proxy للـ Backend
  *
+ * ✅ الخيار A (2026-11-09):
+ * - تبسيط manifest.icons: استخدام /logo.png فقط (بدل 8 ملفات icons/*.png)
+ * - تبسيط includeAssets: لا icons/*.png
+ * - devOptions.enabled: false (مؤقتاً — لمسح Service Worker cache)
+ *
  * لماذا هذا الملف:
  * - يحدد إعدادات التطوير والبناء.
  * - يفعّل PWA (Service Worker + Manifest).
@@ -31,19 +36,17 @@ export default defineConfig({
       // ✅ يُحدَّث تلقائياً عند توفر نسخة جديدة
       registerType: 'autoUpdate',
 
-      // ✅ تفعيل في التطوير (لتسهيل اختبار PWA)
+      // ⚠️ مؤقتاً — لمسح Service Worker cache (مشكلة الأيقونات)
+      // بعد اختبار الأيقونات — أعدها إلى true (أو اتركها false — لن تؤثر على الإنتاج)
       devOptions: {
-        enabled: true,
-        type: 'module',
-        navigateFallback: 'index.html',
+        enabled: false,
       },
 
-      // ✅ الملفات التي تُضمَّن في الـ precache
+      // ✅ تبسيط: logo.png فقط (يُستخدم لكل الأحجام)
       includeAssets: [
         'favicon.ico',
         'robots.txt',
         'logo.png',
-        'icons/*.png',
       ],
 
       // ✅ إعدادات Manifest
@@ -60,15 +63,26 @@ export default defineConfig({
         background_color: '#ffffff',
         theme_color: '#1E40AF',
         categories: ['business', 'productivity'],
+        // ✅ تبسيط: logo.png فقط (بدل 8 ملفات icons/*.png)
         icons: [
-          { src: 'icons/icon-72x72.png',   sizes: '72x72',   type: 'image/png' },
-          { src: 'icons/icon-96x96.png',   sizes: '96x96',   type: 'image/png' },
-          { src: 'icons/icon-128x128.png', sizes: '128x128', type: 'image/png' },
-          { src: 'icons/icon-144x144.png', sizes: '144x144', type: 'image/png' },
-          { src: 'icons/icon-152x152.png', sizes: '152x152', type: 'image/png' },
-          { src: 'icons/icon-192x192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
-          { src: 'icons/icon-384x384.png', sizes: '384x384', type: 'image/png' },
-          { src: 'icons/icon-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+          {
+            src: '/logo.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'any',
+          },
+          {
+            src: '/logo.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any',
+          },
+          {
+            src: '/logo.png',
+            sizes: 'any',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
         ],
       },
 

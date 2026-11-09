@@ -3,23 +3,21 @@
  * @description
  * منطق الداشبورد التفاعلي — KPIs + رسوم + جداول مصغرة.
  *
- * لماذا هذا الملف؟
- * - يجمع كل بيانات الداشبورد في مكان واحد (aggregations محسّنة).
- * - يعالج Scope (sales_rep يرى بياناته فقط، pharmacy يرى فواتيره فقط).
- * - يحسب المقارنة بالفترة السابقة لكل KPI.
- * - يملأ الأيام الفارغة في رسم المبيعات بـ 0 (لتجربة مستخدم نظيفة).
+ * ✅ 🅲 (2026-11-08):
+ * - حُذف import { Check, CHECK_STATUSES }.
+ * - حُذفت computeChecksKPIs() + getMiniUpcomingChecks().
+ * - حُذف checksKPIs + upcomingChecks من getDashboardData.
  *
  * ⚠️ ملاحظات معمارية:
  * - لا يعتمد على AccountingEntry (لتقارير الميزان لاحقاً).
  * - يستخدم currentBalance في CashFund/BankAccount (الحقل الفعلي).
  * - يستخدم isReversed في CashTransaction (وليس isCancelled).
- * - يستخدم 'collected' في Check (وليس 'paid').
  */
 
 import mongoose from 'mongoose';
 
 import { Invoice, INVOICE_STATUSES } from '../models/Invoice.js';
-import { Check, CHECK_STATUSES } from '../models/Check.js';
+// ⚠️ 🅲: حُذف import { Check, CHECK_STATUSES }
 import { Stock } from '../models/Stock.js';
 import { CashFund } from '../models/CashFund.js';
 import { BankAccount } from '../models/BankAccount.js';
@@ -168,48 +166,11 @@ async function computeSalesKPIs(from, to, scope) {
 }
 
 // ============================================================
-// 2) شيكات: معلقة + متأخرة + قريبة
+// 2) ⚠️ 🅲: شيكات KPI — محذوفة
 // ============================================================
-
-async function computeChecksKPIs() {
-  const now = new Date();
-  const in7 = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-
-  const [pending, overdue, dueSoon] = await Promise.all([
-    Check.aggregate([
-      { $match: { status: CHECK_STATUSES.PENDING } },
-      { $group: { _id: null, count: { $sum: 1 }, total: { $sum: '$amount' } } },
-    ]),
-    Check.aggregate([
-      { $match: { status: CHECK_STATUSES.PENDING, dueDate: { $lt: now } } },
-      { $group: { _id: null, count: { $sum: 1 }, total: { $sum: '$amount' } } },
-    ]),
-    Check.aggregate([
-      {
-        $match: {
-          status: CHECK_STATUSES.PENDING,
-          dueDate: { $gte: now, $lte: in7 },
-        },
-      },
-      { $group: { _id: null, count: { $sum: 1 }, total: { $sum: '$amount' } } },
-    ]),
-  ]);
-
-  return {
-    pending: {
-      count: pending[0]?.count || 0,
-      total: round2(pending[0]?.total || 0),
-    },
-    overdue: {
-      count: overdue[0]?.count || 0,
-      total: round2(overdue[0]?.total || 0),
-    },
-    dueSoon: {
-      count: dueSoon[0]?.count || 0,
-      total: round2(dueSoon[0]?.total || 0),
-    },
-  };
-}
+// computeChecksKPIs() — كانت تحسب pending/overdue/dueSoon
+// getMiniUpcomingChecks() — كانت تُرجع 5 شيكات قريبة
+// Check أُلغي — هذه الدوال لم تعد موجودة.
 
 // ============================================================
 // 3) أصناف تحت الحد الأدنى
@@ -319,7 +280,7 @@ async function computeFinancialSnapshot() {
 // ============================================================
 
 async function computeCashFlow(from, to) {
-  const results = await CashTransaction.aggregate([      // ← بدون [ ]
+  const results = await CashTransaction.aggregate([
     {
       $match: {
         isReversed: { $ne: true },
@@ -335,7 +296,6 @@ async function computeCashFlow(from, to) {
     },
   ]);
 
-  // ✅ نتائج aggregate مصفوفة دائماً — حتى لو فارغة
   const byDir = results.reduce((acc, r) => {
     acc[r._id] = { total: round2(r.total), count: r.count };
     return acc;
@@ -509,34 +469,7 @@ async function getMiniPendingInvoices(limit, scope) {
   }));
 }
 
-async function getMiniUpcomingChecks(limit, days = 30) {
-  const now = new Date();
-  const end = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
-
-  const checks = await Check.find({
-    status: CHECK_STATUSES.PENDING,
-    dueDate: { $gte: now, $lte: end },
-  })
-    .populate('customerId', 'name')
-    .populate('supplierId', 'name')
-    .sort({ dueDate: 1 })
-    .limit(limit)
-    .lean();
-
-  return checks.map((c) => ({
-    _id: c._id,
-    checkNumber: c.checkNumber,
-    type: c.type,
-    bankName: c.bankName,
-    drawerName: c.customerId?.name || c.supplierId?.name || '',
- 
-    amount: round2(c.amount),
-    dueDate: c.dueDate,
-    daysUntilDue: Math.ceil(
-      (new Date(c.dueDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
-    ),
-  }));
-}
+// ⚠️ 🅲: getMiniUpcomingChecks() — محذوفة (Check أُلغي)
 
 // ============================================================
 // Orchestrator
@@ -544,6 +477,8 @@ async function getMiniUpcomingChecks(limit, days = 30) {
 
 /**
  * جمع كل بيانات الداشبورد.
+ *
+ * ✅ 🅲: حُذف checksKPIs + upcomingChecks (Check أُلغي).
  */
 export async function getDashboardData({
   req,
@@ -560,7 +495,7 @@ export async function getDashboardData({
   const [
     currentSales,
     previousSales,
-    checksKPIs,
+    // ⚠️ 🅲: حُذف checksKPIs
     lowStock,
     financialSnapshot,
     cashFlowCurrent,
@@ -569,11 +504,11 @@ export async function getDashboardData({
     categoryDistribution,
     salesByRep,
     pendingInvoices,
-    upcomingChecks,
+    // ⚠️ 🅲: حُذف upcomingChecks
   ] = await Promise.all([
     computeSalesKPIs(resolved.from, resolved.to, scope),
     computeSalesKPIs(prev.from, prev.to, scope),
-    computeChecksKPIs(),
+    // ⚠️ 🅲: حُذف computeChecksKPIs()
     computeLowStock(lowStockLimit),
     computeFinancialSnapshot(),
     computeCashFlow(resolved.from, resolved.to),
@@ -582,7 +517,7 @@ export async function getDashboardData({
     computeCategoryDistribution(resolved.from, resolved.to, scope),
     req.user.role === 'sales_rep' ? Promise.resolve([]) : computeSalesByRep(resolved.from, resolved.to),
     getMiniPendingInvoices(5, scope),
-    getMiniUpcomingChecks(5, 30),
+    // ⚠️ 🅲: حُذف getMiniUpcomingChecks()
   ]);
 
   return {
@@ -609,7 +544,7 @@ export async function getDashboardData({
         current: cashFlowCurrent,
         previous: cashFlowPrevious,
       },
-      checks: checksKPIs,
+      // ⚠️ 🅲: حُذف checks: checksKPIs
       lowStock: {
         total: lowStock.total,
       },
@@ -622,7 +557,7 @@ export async function getDashboardData({
     },
     tables: {
       pendingInvoices,
-      upcomingChecks,
+      // ⚠️ 🅲: حُذف upcomingChecks
       lowStockItems: lowStock.items,
     },
     meta: {

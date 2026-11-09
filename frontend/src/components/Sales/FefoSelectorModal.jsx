@@ -183,7 +183,7 @@ function FefoSelectorModal({ isOpen, onClose, onSelect, item, warehouseId, initi
     })();
 
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, itemId, warehouseId]);
 
   // ═══════════════════════════════════════════════
@@ -276,6 +276,23 @@ function FefoSelectorModal({ isOpen, onClose, onSelect, item, warehouseId, initi
       return;
     }
 
+    // ⚠️ Phase A: نُمرّر itemId + itemName + unitCost + isBelowRecommended
+    const refBatch =
+      mode === 'manual' && selectedBatch
+        ? batches.find((b) => b.batch === selectedBatch || b.id === selectedBatch)
+        : fefoPreview[0] || batches[0];
+
+    const basePayload = {
+      itemId: itemId,
+      itemName: item?.tradeName || item?.name || '—',
+      unitCost: refBatch?.unitCost || 0,
+      unitPrice: unitPriceNum,
+      quantity: quantityNum,
+      overrideReason:
+        priceCheck.status === 'WARN_OVERRIDE' ? overrideReason.trim() : undefined,
+      isBelowRecommended: priceCheck.status === 'WARN_OVERRIDE',
+    };
+
     if (mode === 'manual') {
       const batchData = batches.find(
         (b) => b.batch === selectedBatch || b.id === selectedBatch
@@ -285,19 +302,19 @@ function FefoSelectorModal({ isOpen, onClose, onSelect, item, warehouseId, initi
         return;
       }
       onSelect({
+        ...basePayload,
         batch: batchData.batch,
         expiry: batchData.expiry,
-        unitPrice: unitPriceNum,
-        quantity: quantityNum,
-        overrideReason: priceCheck.status === 'WARN_OVERRIDE' ? overrideReason.trim() : undefined,
       });
     } else {
+      // ⚠️ Phase A.4: Zod يرفض batch=null — نستخدم fefoPreview[0].batch
+      // invoiceService يستخدم bulkIssueStock ويختار الدفعات الحقيقية،
+      // لكن Zod يحتاج string في البداية.
+      const firstBatch = fefoPreview[0] || batches[0];
       onSelect({
-        batch: null,
-        expiry: null,
-        unitPrice: unitPriceNum,
-        quantity: quantityNum,
-        overrideReason: priceCheck.status === 'WARN_OVERRIDE' ? overrideReason.trim() : undefined,
+        ...basePayload,
+        batch: firstBatch?.batch || null,
+        expiry: firstBatch?.expiry || null,
       });
     }
   };
@@ -403,7 +420,7 @@ function FefoSelectorModal({ isOpen, onClose, onSelect, item, warehouseId, initi
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
                 min="0.01"
-                step="0.01"
+                step="any"
                 required
               />
               <Input
@@ -412,7 +429,7 @@ function FefoSelectorModal({ isOpen, onClose, onSelect, item, warehouseId, initi
                 value={unitPrice}
                 onChange={(e) => setUnitPrice(e.target.value)}
                 min="0"
-                step="0.01"
+                step="any"
                 required
                 error={
                   priceCheck.status === 'BLOCKED'

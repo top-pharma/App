@@ -2,14 +2,12 @@
  * @file InvoicesPage.jsx
  * @description صفحة الفواتير — Phase 2.5 (دعم المسودات).
  *
- * إضافة:
- *  - فلتر "مسودة" في القائمة.
- *  - زر "متابعة" للمسودات (يفتح Detail).
- *  - زر "اعتماد" سريع على صفوف المسودات (ينقل للـ Detail مع auto-finalize).
+ * ✅ Phase A.8: listInvoices يعيد { items, pagination }.
+ * ✅ 🅳: زر "إنشاء فاتورة" + auto-open via location.state.openCreateForm.
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   Plus, FileText, Search, X, Eye, AlertCircle, Clock, CheckCircle2, Ban,
   FileEdit, Send,
@@ -28,6 +26,7 @@ import InvoiceForm from '../components/Sales/InvoiceForm.jsx';
 
 import { INVOICE_STATUS_LABELS_AR, PAYMENT_TYPE_LABELS_AR } from '../utils/constants.js';
 import { formatCurrency, formatDate, formatNumber } from '../utils/formatters.js';
+import * as invoicesAPI from '../api/invoicesAPI.js';
 
 function StatusBadge({ status }) {
   const map = {
@@ -65,6 +64,8 @@ function InvoicesPage() {
   const { isAdmin, isAccountant, isSalesRep } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
+  const location = useLocation();  // ✅ 🅳: auto-open
+
   const { invoices, pagination, loading, error, stats, fetchInvoices, resetError } = useInvoices();
 
   const [search, setSearch] = useState('');
@@ -72,8 +73,18 @@ function InvoicesPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [paymentTypeFilter, setPaymentTypeFilter] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [currentLimit, setCurrentLimit] = useState(20);
+  const [currentLimit, setCurrentLimit] = useState(10);
   const [isFormOpen, setIsFormOpen] = useState(false);
+
+  // ✅ 🅳: فتح نموذج الإنشاء تلقائياً عند الوصول من Dashboard
+  useEffect(() => {
+    if (location.state?.openCreateForm) {
+      setIsFormOpen(true);
+      // نظّف الـ state حتى لا يُفتح مرة أخرى عند reload
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
 
   useEffect(() => {
     const t = setTimeout(() => { setDebouncedSearch(search); setCurrentPage(1); }, 300);
@@ -99,10 +110,9 @@ function InvoicesPage() {
   const hasActiveFilters = Boolean(search || statusFilter || paymentTypeFilter);
 
   const handleCreateSuccess = () => {
-  setIsFormOpen(false);
-  // ✅ Toast مُدار من InvoiceForm (نعرف نوع العملية هناك)
-  loadInvoices();
-};
+    setIsFormOpen(false);
+    loadInvoices();
+  };
 
   const columns = [
     {
@@ -251,9 +261,26 @@ function InvoicesPage() {
           onLimitChange={(l) => { setCurrentLimit(l); setCurrentPage(1); }} />
       )}
 
-      <Modal isOpen={isFormOpen} onClose={() => setIsFormOpen(false)}
-        title="إنشاء فاتورة جديدة" size="full" closeOnOverlay={false}>
-        <InvoiceForm mode="create" onSuccess={handleCreateSuccess} onCancel={() => setIsFormOpen(false)} />
+      <Modal
+        isOpen={isFormOpen}
+        onClose={() => setIsFormOpen(false)}
+        title="إنشاء فاتورة جديدة"
+        size="full"
+        closeOnOverlay={false}
+      >
+        <InvoiceForm
+          mode="new"
+          onSubmit={async (payload) => {
+            try {
+              await invoicesAPI.createInvoice(payload);
+              handleCreateSuccess();
+              toast.success('تم إنشاء الفاتورة بنجاح');
+            } catch (err) {
+              toast.error(err?.error?.message || err?.message || 'فشل حفظ الفاتورة');
+            }
+          }}
+          onClose={() => setIsFormOpen(false)}
+        />
       </Modal>
     </div>
   );

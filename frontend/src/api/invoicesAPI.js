@@ -1,9 +1,12 @@
 /**
  * @file invoicesAPI.js
- * @description دوال API للفواتير — Phase 2.5 (المسودات + التقييد السعري).
+ * @description دوال API للفواتير — Phase 2.5 + Phase A.6/A.7/A.8.
+ *
+ * ⚠️ Phase A.8: يستخدم normalizeListWithId من _helpers.js.
  */
 
 import axiosInstance from './axiosInstance.js';
+import { normalizeListWithId, withId, withIds } from './_helpers.js';
 
 // ═══════════════════════════════════════════════
 // 1. القراءة
@@ -11,34 +14,32 @@ import axiosInstance from './axiosInstance.js';
 
 export async function listInvoices(params = {}) {
   const { data } = await axiosInstance.get('/invoices', { params });
-  return data.data;
+  return normalizeListWithId(data);
 }
 
 export async function getMyInvoices(params = {}) {
   const { data } = await axiosInstance.get('/invoices/my-invoices', { params });
-  return data.data;
+  const items = Array.isArray(data?.data) ? data.data : [];
+  return withIds(items);
 }
 
 export async function getInvoice(id) {
   const { data } = await axiosInstance.get(`/invoices/${id}`);
-  return data.data;
+  return withId(data.data);
 }
 
 // ═══════════════════════════════════════════════
-// 2. الإنشاء (نهائية أو مسودة)
+// 2. الإنشاء
 // ═══════════════════════════════════════════════
 
 export async function createInvoice(payload) {
   const { data } = await axiosInstance.post('/invoices', payload);
-  return data.data;
+  return withId(data.data);
 }
 
-/**
- * Phase 2.5 — إنشاء مسودة (لا تأثير على المخزون/المال).
- */
 export async function createDraftInvoice(payload) {
   const { data } = await axiosInstance.post('/invoices/draft', payload);
-  return data.data;
+  return withId(data.data);
 }
 
 // ═══════════════════════════════════════════════
@@ -47,12 +48,12 @@ export async function createDraftInvoice(payload) {
 
 export async function updateDraftInvoice(id, payload) {
   const { data } = await axiosInstance.patch(`/invoices/${id}/draft`, payload);
-  return data.data;
+  return withId(data.data);
 }
 
 export async function updateInvoice(id, payload) {
   const { data } = await axiosInstance.patch(`/invoices/${id}`, payload);
-  return data.data;
+  return withId(data.data);
 }
 
 // ═══════════════════════════════════════════════
@@ -61,17 +62,17 @@ export async function updateInvoice(id, payload) {
 
 export async function finalizeInvoice(id, payload) {
   const { data } = await axiosInstance.post(`/invoices/${id}/finalize`, payload);
-  return data.data;
+  return withId(data.data);
 }
 
 export async function cancelInvoice(id, payload) {
   const { data } = await axiosInstance.patch(`/invoices/${id}/cancel`, payload);
-  return data.data;
+  return withId(data.data);
 }
 
 export async function registerPayment(id, payload) {
   const { data } = await axiosInstance.post(`/invoices/${id}/payments`, payload);
-  return data.data;
+  return withId(data.data);
 }
 
 export default {

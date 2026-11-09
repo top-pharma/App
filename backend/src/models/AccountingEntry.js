@@ -7,14 +7,18 @@
  * - كل عملية مالية تُنشئ قيداً: مدين = دائن (توازن إلزامي).
  * - القيود immutable: للتصحيح، نُنشئ قيداً عكسياً (reverseEntry).
  * - نُخزّن snapshot من أكواد/أسماء الحسابات في lines[] (history آمن).
- * - sourceType + sourceId يربط القيد بمصدره (Invoice, Check, CashTransaction, ...).
+ * - sourceType + sourceId يربط القيد بمصدره (Invoice, CashTransaction, ...).
  * - entryNumber فريد بالتنسيق: JE-YYYYMM-000001.
  *
- * أنواع القيود:
+ * ✅ 🅲 (2026-11-08):
+ * - حُذفت 5 أنواع CHECK_* من ACCOUNTING_ENTRY_TYPES:
+ *   CHECK_RECEIVED, CHECK_COLLECTED, CHECK_BOUNCED, CHECK_ISSUED, CHECK_PAID.
+ * - Check أُلغي.
+ *
+ * أنواع القيود (بعد 🅲):
  *  - SALE_CASH, SALE_CREDIT, SALE_RETURN
  *  - CUSTOMER_PAYMENT
  *  - PURCHASE, PURCHASE_RETURN
- *  - CHECK_RECEIVED, CHECK_COLLECTED, CHECK_BOUNCED, CHECK_ISSUED, CHECK_PAID
  *  - CASH_TRANSFER, CASH_DEPOSIT, CASH_WITHDRAWAL
  *  - EXPENSE, OPENING, ADJUSTMENT
  */
@@ -25,6 +29,7 @@ const { Schema, model } = mongoose;
 
 /**
  * أنواع القيود المدعومة.
+ * ✅ 🅲: حُذفت 5 أنواع CHECK_*.
  */
 export const ACCOUNTING_ENTRY_TYPES = Object.freeze([
   'SALE_CASH',
@@ -33,11 +38,7 @@ export const ACCOUNTING_ENTRY_TYPES = Object.freeze([
   'CUSTOMER_PAYMENT',
   'PURCHASE',
   'PURCHASE_RETURN',
-  'CHECK_RECEIVED',
-  'CHECK_COLLECTED',
-  'CHECK_BOUNCED',
-  'CHECK_ISSUED',
-  'CHECK_PAID',
+  // ⚠️ 🅲: حُذفت CHECK_RECEIVED / CHECK_COLLECTED / CHECK_BOUNCED / CHECK_ISSUED / CHECK_PAID
   'CASH_TRANSFER',
   'CASH_DEPOSIT',
   'CASH_WITHDRAWAL',
@@ -109,7 +110,7 @@ const accountingEntrySchema = new Schema(
     },
 
     /**
-     * نوع القيد (SALE_CASH, CHECK_PAID, ...).
+     * نوع القيد (SALE_CASH, CUSTOMER_PAYMENT, ...).
      */
     entryType: {
       type: String,
@@ -163,7 +164,7 @@ const accountingEntrySchema = new Schema(
     },
 
     /**
-     * نوع المصدر (Invoice, Check, CashTransaction, ...).
+     * نوع المصدر (Invoice, CashTransaction, ...).
      */
     sourceType: {
       type: String,

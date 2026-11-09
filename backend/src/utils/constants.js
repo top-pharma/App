@@ -6,6 +6,18 @@
  * ⚠️ AUDIT_ACTIONS يُعاد تصديره من models/AuditLog.js
  *    (المصدر الوحيد للحقيقة — يمنع الازدواجية).
  *
+ * ✅ 🅱 (2026-11-08):
+ * - حذف DELIVERY_NOTE_STATUS.
+ * - حذف CASH_TRANSACTION_REFERENCES.DELIVERY_NOTE.
+ *
+ * ✅ 🅲 (2026-11-08):
+ * - حذف CHECK_STATUS (4 حالات).
+ * - حذف CHECK_TYPES (2 نوع).
+ * - حذف PAYMENT_METHODS.CHECK.
+ * - حذف CASH_TRANSACTION_METHODS.CHECK.
+ * - حذف CASH_TRANSACTION_REFERENCES.CHECK.
+ * - حذف ACCOUNTING_ENTRY_TYPES.CHECK_* (5 أنواع).
+ *
  * المبادئ:
  *  - كل ثابت مجمّد (Object.freeze) — لا تعديل.
  *  - القيم تتوافق مع enum في النماذج.
@@ -14,14 +26,6 @@
 /* ─────────────────────────────────────────────────────────────
  * 1) سجل التدقيق (Audit Log)
  * ─────────────────────────────────────────────────────────────
- * ⚠️ لا نُعرّف AUDIT_ACTIONS محلياً — نستورده من AuditLog.js
- *    ثم نُعيد تصديره. هذا يضمن تطابقاً حرفياً مع enum في الموديل
- *    (الذي يرفض أي قيمة غير معروفة عند الحفظ في MongoDB).
- *
- * ⚠️ لماذا import + export بدلاً من export { X } from '...'؟
- *    لأن الصيغة المختصرة (re-export) لا تُنشئ ربطاً محلياً، فلا
- *    يمكن استخدام AUDIT_ACTIONS داخل التصدير الافتراضي في نهاية
- *    الملف (سيرمي ReferenceError).
  */
 import { AUDIT_ACTIONS } from '../models/AuditLog.js';
 export { AUDIT_ACTIONS };
@@ -52,26 +56,19 @@ export const INVOICE_STATUS = Object.freeze({
 });
 
 /* ─────────────────────────────────────────────────────────────
- * 4) حالات الشيك (Check Status) — النسخة المبسطة (4 حالات)
+ * 4) ⚠️ 🅲: CHECK_STATUS — محذوف
+ *    (كان: pending / paid / bounced / cancelled)
  * ─────────────────────────────────────────────────────────────
- * pending → (settle) → paid
- *         → (cancel) → cancelled
- * paid    → (bounce) → bounced
  */
-export const CHECK_STATUS = Object.freeze({
-  PENDING: 'pending',
-  PAID: 'paid',
-  BOUNCED: 'bounced',
-  CANCELLED: 'cancelled',
-});
-
-export const CHECK_TYPES = Object.freeze({
-  INCOMING: 'incoming',
-  OUTGOING: 'outgoing',
-});
 
 /* ─────────────────────────────────────────────────────────────
- * 5) أنواع الدفع (Payment Types)
+ * 5) ⚠️ 🅲: CHECK_TYPES — محذوف
+ *    (كان: incoming / outgoing)
+ * ─────────────────────────────────────────────────────────────
+ */
+
+/* ─────────────────────────────────────────────────────────────
+ * 6) أنواع الدفع (Payment Types)
  * ─────────────────────────────────────────────────────────────
  */
 export const PAYMENT_TYPES = Object.freeze({
@@ -81,17 +78,17 @@ export const PAYMENT_TYPES = Object.freeze({
 });
 
 /* ─────────────────────────────────────────────────────────────
- * 6) طرق الدفع (Payment Methods)
+ * 7) طرق الدفع (Payment Methods)
  * ─────────────────────────────────────────────────────────────
+ * ✅ 🅲: حُذف CHECK — فقط CASH + BANK
  */
 export const PAYMENT_METHODS = Object.freeze({
   CASH: 'cash',
   BANK: 'bank',
-  CHECK: 'check',
 });
 
 /* ─────────────────────────────────────────────────────────────
- * 7) الحركات النقدية (Cash Transactions)
+ * 8) الحركات النقدية (Cash Transactions)
  * ─────────────────────────────────────────────────────────────
  */
 export const CASH_TRANSACTION_DIRECTIONS = Object.freeze({
@@ -99,26 +96,29 @@ export const CASH_TRANSACTION_DIRECTIONS = Object.freeze({
   OUT: 'out',
 });
 
+/**
+ * ✅ 🅲: حُذف CHECK — فقط CASH + BANK
+ */
 export const CASH_TRANSACTION_METHODS = Object.freeze({
   CASH: 'cash',
   BANK: 'bank',
-  CHECK: 'check',
 });
 
+/**
+ * ✅ 🅲: حُذف DELIVERY_NOTE (🅱) + CHECK (🅲).
+ */
 export const CASH_TRANSACTION_REFERENCES = Object.freeze({
   MANUAL: 'manual',
   INVOICE: 'invoice',
-  DELIVERY_NOTE: 'delivery_note',
   CUSTOMER_RETURN: 'customer_return',
   PURCHASE: 'purchase',
   SUPPLIER_RETURN: 'supplier_return',
-  CHECK: 'check',
   TRANSFER: 'transfer',
   EXPENSE: 'expense',
 });
 
 /* ─────────────────────────────────────────────────────────────
- * 8) حالات مرتجع العميل (Customer Return)
+ * 9) حالات مرتجع العميل (Customer Return)
  * ─────────────────────────────────────────────────────────────
  */
 export const CUSTOMER_RETURN_STATUS = Object.freeze({
@@ -133,7 +133,7 @@ export const CUSTOMER_RETURN_SETTLEMENT = Object.freeze({
 });
 
 /* ─────────────────────────────────────────────────────────────
- * 9) حالات مرتجع المورد (Supplier Return)
+ * 10) حالات مرتجع المورد (Supplier Return)
  * ─────────────────────────────────────────────────────────────
  */
 export const SUPPLIER_RETURN_STATUS = Object.freeze({
@@ -150,7 +150,7 @@ export const SUPPLIER_RETURN_SETTLEMENT = Object.freeze({
 });
 
 /* ─────────────────────────────────────────────────────────────
- * 10) حالات إيصال الاستلام (Purchase Receipt)
+ * 11) حالات إيصال الاستلام (Purchase Receipt)
  * ─────────────────────────────────────────────────────────────
  */
 export const PURCHASE_RECEIPT_STATUS = Object.freeze({
@@ -160,18 +160,15 @@ export const PURCHASE_RECEIPT_STATUS = Object.freeze({
 });
 
 /* ─────────────────────────────────────────────────────────────
- * 11) حالات إيصال التسليم (Delivery Note)
+ * 12) ⚠️ 🅱: DELIVERY_NOTE_STATUS — محذوف
  * ─────────────────────────────────────────────────────────────
  */
-export const DELIVERY_NOTE_STATUS = Object.freeze({
-  PENDING: 'pending',
-  DELIVERED: 'delivered',
-  CANCELLED: 'cancelled',
-});
 
 /* ─────────────────────────────────────────────────────────────
- * 12) أنواع القيود المحاسبية (Accounting Entry Types)
+ * 13) أنواع القيود المحاسبية (Accounting Entry Types)
  * ─────────────────────────────────────────────────────────────
+ * ✅ 🅲: حُذفت 5 أنواع CHECK_* (CHECK_RECEIVED, CHECK_COLLECTED,
+ *    CHECK_BOUNCED, CHECK_ISSUED, CHECK_PAID)
  */
 export const ACCOUNTING_ENTRY_TYPES = Object.freeze({
   SALE_CASH: 'SALE_CASH',
@@ -180,11 +177,7 @@ export const ACCOUNTING_ENTRY_TYPES = Object.freeze({
   CUSTOMER_PAYMENT: 'CUSTOMER_PAYMENT',
   PURCHASE: 'PURCHASE',
   PURCHASE_RETURN: 'PURCHASE_RETURN',
-  CHECK_RECEIVED: 'CHECK_RECEIVED',
-  CHECK_COLLECTED: 'CHECK_COLLECTED',
-  CHECK_BOUNCED: 'CHECK_BOUNCED',
-  CHECK_ISSUED: 'CHECK_ISSUED',
-  CHECK_PAID: 'CHECK_PAID',
+  // ⚠️ 🅲: حُذفت CHECK_RECEIVED / CHECK_COLLECTED / CHECK_BOUNCED / CHECK_ISSUED / CHECK_PAID
   CASH_TRANSFER: 'CASH_TRANSFER',
   CASH_DEPOSIT: 'CASH_DEPOSIT',
   CASH_WITHDRAWAL: 'CASH_WITHDRAWAL',
@@ -195,7 +188,7 @@ export const ACCOUNTING_ENTRY_TYPES = Object.freeze({
 });
 
 /* ─────────────────────────────────────────────────────────────
- * 13) أنواع الإشعارات (Notification Types)
+ * 14) أنواع الإشعارات (Notification Types)
  * ─────────────────────────────────────────────────────────────
  * ⚠️ يجب أن تطابق models/Notification.js NOTIFICATION_TYPES حرفياً.
  * ⚠️ في Jobs استخدم الاستيراد من models/Notification.js مباشرة.
@@ -207,8 +200,8 @@ export const NOTIFICATION_TYPES = Object.freeze({
   STOCK_EXPIRED: 'stock_expired',
   INVOICE_DUE: 'invoice_due',
   INVOICE_OVERDUE: 'invoice_overdue',
-  CHECK_DUE: 'check_due',
-  CHECK_OVERDUE: 'check_overdue',
+  CHECK_DUE: 'check_due',        // ← ⚠️ يبقى مؤقتاً (للإشعارات القديمة في DB)
+  CHECK_OVERDUE: 'check_overdue', // ← ⚠️ يبقى مؤقتاً
   RETURN_GRACE_WARNING: 'return_grace_warning',
   SALES_REP_SETTLEMENT: 'sales_rep_settlement',
   ACCOUNT_LOCKED: 'account_locked',
@@ -222,7 +215,7 @@ export const NOTIFICATION_LEVELS = Object.freeze({
 });
 
 /* ─────────────────────────────────────────────────────────────
- * 14) أنواع المخازن (Warehouse Types)
+ * 15) أنواع المخازن (Warehouse Types)
  * ─────────────────────────────────────────────────────────────
  */
 export const WAREHOUSE_TYPES = Object.freeze({
@@ -231,22 +224,23 @@ export const WAREHOUSE_TYPES = Object.freeze({
 });
 
 /* ─────────────────────────────────────────────────────────────
- * 15) ثوابت مالية
+ * 16) ثوابت مالية
  * ─────────────────────────────────────────────────────────────
  */
 export const CURRENCY = 'SDG';
 export const ROUNDING_TOLERANCE = 0.01;
 
 /* ─────────────────────────────────────────────────────────────
- * 16) التصدير الافتراضي (للتوافق إن استُخدم `import constants from ...`)
+ * 17) التصدير الافتراضي
  * ─────────────────────────────────────────────────────────────
+ * ✅ 🅲: حُذفت CHECK_STATUS + CHECK_TYPES
  */
 export default {
-  AUDIT_ACTIONS,       // ← الآن يعمل (binding محلي موجود من import)
+  AUDIT_ACTIONS,
   ROLE_CODES,
   INVOICE_STATUS,
-  CHECK_STATUS,
-  CHECK_TYPES,
+  // ⚠️ 🅲: CHECK_STATUS — محذوف
+  // ⚠️ 🅲: CHECK_TYPES — محذوف
   PAYMENT_TYPES,
   PAYMENT_METHODS,
   CASH_TRANSACTION_DIRECTIONS,
@@ -257,7 +251,7 @@ export default {
   SUPPLIER_RETURN_STATUS,
   SUPPLIER_RETURN_SETTLEMENT,
   PURCHASE_RECEIPT_STATUS,
-  DELIVERY_NOTE_STATUS,
+  // ⚠️ 🅱: DELIVERY_NOTE_STATUS — محذوف
   ACCOUNTING_ENTRY_TYPES,
   NOTIFICATION_TYPES,
   NOTIFICATION_LEVELS,

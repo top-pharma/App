@@ -4,13 +4,12 @@
  * قالب طباعة الفاتورة (A4) بترويسة الشركة، تذييل، وعلامة مائية.
  * يعتمد على بيانات `Invoice` من الـ Backend + إعدادات `Settings`.
  *
- * لماذا هذا الملف؟
- * - يحاكي شكل الفواتير الورقية الاحترافية (مثل نموذج Phenom المرفق).
- * - يدعم RTL بشكل كامل + أرقام إنجليزية (باستخدام formatters.js).
- * - يعمل كـ Preview داخل التطبيق + عند الطباعة (window.print).
- * - يستخدم @media print لإخفاء الأزرار وإظهار الترويسة فقط.
- * - ماء العلامة المائية: صورة شعار الشركة مكررة في المنتصف بشفافية 5%
- *   (تظهر خلف الجداول كما في الصورة المرفقة).
+ * ✅ الخيار A (2026-11-09):
+ * - اللوغو: '/logo.png' بدل '/logo-placeholder.png' (في Watermark + 2 Logo)
+ * - إضافة onError لإخفاء الصور إن لم توجد
+ * - الفوتر: mt-auto (بدل mt-4) لدفعه لأسفل A4
+ * - print-container: flex flex-col لدفع الفوتر
+ * - relative z-10: flex flex-col flex-1
  */
 
 import { useRef } from 'react';
@@ -83,28 +82,30 @@ function InvoicePrint({ invoice, company, onClose }) {
       {/* محتوى الفاتورة (يُطبع) */}
       <div
         ref={printRef}
-        className="print-container relative bg-white text-black w-full max-w-[210mm] min-h-[297mm] shadow-xl print:shadow-none p-6"
+        className="print-container relative bg-white text-black w-full max-w-[210mm] min-h-[297mm] shadow-xl print:shadow-none p-6 flex flex-col"
         dir="rtl"
       >
         {/* 1. العلامة المائية (Watermark) */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
           <img
-            src={company.logoUrl || '/logo-placeholder.png'}
+            src={company.logoUrl || '/logo.png'}
             alt="Watermark"
             className="w-[500px] h-[500px] object-contain opacity-[0.05]"
             style={{ filter: 'grayscale(100%)' }}
+            onError={(e) => { e.target.style.display = 'none'; }}
           />
         </div>
 
         {/* 2. المحتوى الفعلي */}
-        <div className="relative z-10">
+        <div className="relative z-10 flex flex-col flex-1">
           {/* الترويسة (Header) */}
           <div className="flex justify-between items-center border-b-2 border-black pb-2 mb-4">
             <div className="w-24 h-16 flex items-center justify-center">
               <img
-                src={company.logoUrl || '/logo-placeholder.png'}
+                src={company.logoUrl || '/logo.png'}
                 alt="Logo"
                 className="max-w-full max-h-full object-contain"
+                onError={(e) => { e.target.style.display = 'none'; }}
               />
             </div>
             <div className="text-center">
@@ -113,9 +114,10 @@ function InvoicePrint({ invoice, company, onClose }) {
             </div>
             <div className="w-24 h-16 flex items-center justify-center">
               <img
-                src={company.logoUrl || '/logo-placeholder.png'}
+                src={company.logoUrl || '/logo.png'}
                 alt="Logo"
                 className="max-w-full max-h-full object-contain"
+                onError={(e) => { e.target.style.display = 'none'; }}
               />
             </div>
           </div>
@@ -209,8 +211,8 @@ function InvoicePrint({ invoice, company, onClose }) {
             </div>
           </div>
 
-          {/* التذييل (Footer) */}
-          <div className="border-t border-black pt-2 mt-4 text-center text-xs text-neutral-700">
+          {/* التذييل (Footer) — ✅ mt-auto لدفعه لأسفل A4 */}
+          <div className="border-t border-black pt-2 mt-auto text-center text-xs text-neutral-700">
             <p className="font-bold text-sm">{company.name || 'شركة توب فارما الطبية'}</p>
             <p>حساب الشركة (بنك): {company.bankName} - {company.bankAccount} باسم: {company.bankAccountName}</p>
             <p>للاتصال: {company.phone} | البريد الإلكتروني: {company.email}</p>

@@ -515,7 +515,7 @@ function PurchaseReceiptForm({ onSuccess, onCancel }) {
                           value={it.quantity}
                           onChange={(e) => updateItemField(idx, 'quantity', e.target.value)}
                           min="0.01"
-                          step="0.01"
+                          step="any"
                           className="w-full px-1.5 py-1 text-center rounded border border-neutral-300 text-xs numeric focus:outline-none focus:ring-2 focus:ring-primary-200"
                         />
                       </td>
@@ -528,7 +528,7 @@ function PurchaseReceiptForm({ onSuccess, onCancel }) {
                           value={it.unitCost}
                           onChange={(e) => updateItemField(idx, 'unitCost', e.target.value)}
                           min="0"
-                          step="0.01"
+                          step="any"
                           className="w-full px-1.5 py-1 text-left rounded border border-neutral-300 text-xs numeric focus:outline-none focus:ring-2 focus:ring-primary-200"
                         />
                       </td>
@@ -538,7 +538,7 @@ function PurchaseReceiptForm({ onSuccess, onCancel }) {
                           value={it.unitPrice}
                           onChange={(e) => updateItemField(idx, 'unitPrice', e.target.value)}
                           min="0"
-                          step="0.01"
+                          step="any"
                           className="w-full px-1.5 py-1 text-left rounded border border-neutral-300 text-xs numeric focus:outline-none focus:ring-2 focus:ring-primary-200"
                         />
                       </td>
@@ -599,7 +599,7 @@ function PurchaseReceiptForm({ onSuccess, onCancel }) {
                 value={discount}
                 onChange={(e) => setDiscount(e.target.value)}
                 min="0"
-                step="0.01"
+                step="any"
                 className="w-full px-2 py-1.5 rounded-md border border-neutral-300 text-sm numeric focus:outline-none focus:ring-2 focus:ring-primary-200"
               />
               {discountAmount > 0 && (
@@ -617,7 +617,7 @@ function PurchaseReceiptForm({ onSuccess, onCancel }) {
                 onChange={(e) => setTaxRate(e.target.value)}
                 min="0"
                 max="100"
-                step="0.01"
+                step="any"
                 className="w-full px-2 py-1.5 rounded-md border border-neutral-300 text-sm numeric focus:outline-none focus:ring-2 focus:ring-primary-200"
               />
               {taxAmount > 0 && (
@@ -676,7 +676,7 @@ function PurchaseReceiptForm({ onSuccess, onCancel }) {
                   onChange={(e) => setInitialAmount(e.target.value)}
                   min="0"
                   max={total}
-                  step="0.01"
+                  step="any"
                   required
                 />
 

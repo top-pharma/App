@@ -1,12 +1,10 @@
 /**
  * @file stocksAPI.js
- * @description دوال API للمخزون — Phase 2.5.
- *
- * الجديد:
- * - ✅ getBatchesWithFefo: طلب واحد يُرجع كل الدفعات + توصية FEFO + الإجمالي.
+ * @description دوال API للمخزون — Phase A.8.
  */
 
 import axiosInstance from './axiosInstance.js';
+import { normalizeListWithId, withId } from './_helpers.js';
 
 // ═══════════════════════════════════════════════
 // 1. القراءة
@@ -14,24 +12,14 @@ import axiosInstance from './axiosInstance.js';
 
 export async function listStocks(params = {}) {
   const { data } = await axiosInstance.get('/stocks', { params });
-  return data.data;
+  return normalizeListWithId(data);
 }
 
 export async function getStock(id) {
   const { data } = await axiosInstance.get(`/stocks/${id}`);
-  return data.data;
+  return withId(data.data);
 }
 
-/**
- * ✅ Phase 2.5 — endpoint مدمج.
- * يُرجع: { batches, totalAvailable, fefoRecommendation } في طلب واحد.
- *
- * @param {Object} params
- * @param {string} params.itemId
- * @param {string} params.warehouseId
- * @param {number} [params.quantity=0]
- * @returns {Promise<{ batches: Array, totalAvailable: number, fefoRecommendation: Array }>}
- */
 export async function getBatchesWithFefo({ itemId, warehouseId, quantity = 0 }) {
   const { data } = await axiosInstance.get(`/stocks/by-item/${itemId}`, {
     params: { warehouse: warehouseId, quantity },
@@ -60,7 +48,7 @@ export async function getSummary(params = {}) {
 
 export async function createStock(payload) {
   const { data } = await axiosInstance.post('/stocks', payload);
-  return data.data;
+  return withId(data.data);
 }
 
 // ═══════════════════════════════════════════════
@@ -69,7 +57,7 @@ export async function createStock(payload) {
 
 export async function updateStock(id, payload) {
   const { data } = await axiosInstance.patch(`/stocks/${id}`, payload);
-  return data.data;
+  return withId(data.data);
 }
 
 export async function deleteStock(id) {
@@ -78,17 +66,13 @@ export async function deleteStock(id) {
 }
 
 // ═══════════════════════════════════════════════
-// 4. FEFO (اختبار — لا يزال متاحاً)
+// 4. FEFO
 // ═══════════════════════════════════════════════
 
 export async function selectFEFO(payload) {
   const { data } = await axiosInstance.post('/stocks/select-fefo', payload);
   return data.data;
 }
-
-// ═══════════════════════════════════════════════
-// 5. تصدير موحّد
-// ═══════════════════════════════════════════════
 
 export default {
   listStocks,

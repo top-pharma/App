@@ -15,6 +15,10 @@
  * ⚠️ ملاحظة معمارية:
  * - في Refactor مستقبلي، يُفضّل نقل `selectFEFO` إلى هذا الـ Service،
  *   وجعل `stockController` يستدعيه. حالياً نحترم كود Phase 1 المُنجز.
+ *
+ * ✅ Phase A.10 (2026-11-08):
+ * - issueStock يدعم `batch` محدد (manual mode) — بدل FEFO.
+ * - bulkIssueStock يمرّر `batch` لكل سطر.
  */
 
 import { Stock } from '../models/Stock.js';
@@ -53,32 +57,33 @@ const ensureWarehouseActive = async (warehouseId) => {
  * صرف كمية من صنف واحد (سطر فاتورة واحد).
  *
  * الخطوات:
- * 1. اختيار الدفعات بـ FEFO عبر `selectFEFO` (المُصدَّرة من stockController).
+ * 1. إذا `batch` محدد (manual mode) → البحث عن الدفعة مباشرة.
+ *    إذا لا → اختيار الدفعات بـ FEFO عبر `selectFEFO`.
  * 2. خصم الكمية من كل دفعة (بالتسلسل، بلا Transactions).
  * 3. تحديث `lastIssuedAt` لكل دفعة.
+ *
+ * ✅ Phase A.10: يدعم `batch` محدد (manual mode).
  *
  * @async
  * @param {Object} params
  * @param {string} params.itemId - معرف الصنف.
  * @param {string} params.warehouseId - معرف المخزن.
  * @param {number} params.quantity - الكمية المطلوبة (بالوحدة الأساسية).
+ * @param {string} [params.batch=null] - رقم الدفعة المحددة (manual mode).
+ *   - إذا مُرِّر: نستخدمه مباشرة (لا FEFO).
+ *   - إذا `null`: نستخدم FEFO.
  * @param {boolean} [params.allowExpired=false] - السماح بصرف دفعات منتهية (نادراً).
  * @returns {Promise<Array<{stockId, batch, expiry, quantity, unitCost}>>}
- *   قائمة الدفعات التي صُرفت من كل منها (تُحفظ في الفاتورة كـ items).
- * @throws {AppError} INSUFFICIENT_STOCK | WAREHOUSE_NOT_FOUND | ISSUE_FAILED
- *
- * @example
- * const issued = await issueStock({
- *   itemId: item._id,
- *   warehouseId: invoice.warehouse,
- *   quantity: 120,
- * });
- * // issued = [
- * //   { stockId, batch: 'B-001', expiry, quantity: 50, unitCost },
- * //   { stockId, batch: 'B-002', expiry, quantity: 70, unitCost },
- * // ]
+ * @throws {AppError} INSUFFICIENT_STOCK | BATCH_NOT_AVAILABLE | BATCH_INSUFFICIENT |
+ *                    WAREHOUSE_NOT_FOUND | ISSUE_FAILED
  */
-export async function issueStock({ itemId, warehouseId, quantity, allowExpired = false }) {
+export async function issueStock({
+  itemId,
+  warehouseId,
+  quantity,
+  batch = null,
+  allowExpired = false,
+}) {
   if (!itemId || !warehouseId || !quantity || quantity <= 0) {
     throw new AppError('بيانات صرف المخزون غير مكتملة.', 400, 'INVALID_ISSUE_INPUT');
   }
@@ -86,26 +91,78 @@ export async function issueStock({ itemId, warehouseId, quantity, allowExpired =
   // 1) التأكد من وجود المخزن.
   await ensureWarehouseActive(warehouseId);
 
-  // 2) اختيار الدفعات بـ FEFO (يرمي INSUFFICIENT_STOCK إن لم تكفِ).
-  const selectedBatches = await selectFEFO(itemId, warehouseId, quantity, {
-    includeExpired: allowExpired,
-  });
+  // 2) اختيار الدفعات:
+  //    - manual mode: batch محدد → Stock.findOne مباشرة.
+  //    - FEFO mode: selectFEFO (يرمي INSUFFICIENT_STOCK إن لم تكفِ).
+  let selectedBatches;
+
+  if (batch) {
+    const normalizedBatch = String(batch).trim().toUpperCase();
+
+    const stock = await Stock.findOne({
+      item: itemId,
+      batch: normalizedBatch,
+      warehouse: warehouseId,
+      quantity: { $gt: 0 },
+      isQuarantined: false,
+    }).lean();
+
+    if (!stock) {
+      throw new AppError(
+        `الدفعة ${batch} غير متوفرة للصنف ${itemId}.`,
+        400,
+        'BATCH_NOT_AVAILABLE'
+      );
+    }
+
+    // ⚠️ التحقق من الصلاحية (اختياري — batch محدد لا يجب أن يكون منتهياً إلا إذا allowExpired)
+    if (!allowExpired && stock.expiry && new Date(stock.expiry) < new Date()) {
+      throw new AppError(
+        `الدفعة ${batch} منتهية الصلاحية (expiry: ${stock.expiry}).`,
+        400,
+        'BATCH_EXPIRED'
+      );
+    }
+
+    if (Number(stock.quantity) < Number(quantity)) {
+      throw new AppError(
+        `الدفعة ${batch} لا تكفي (متاح: ${stock.quantity}، مطلوب: ${quantity}).`,
+        400,
+        'BATCH_INSUFFICIENT'
+      );
+    }
+
+    selectedBatches = [
+      {
+        stockId: stock._id,
+        batch: stock.batch,
+        expiry: stock.expiry,
+        quantity: Number(quantity),
+        unitCost: stock.unitCost || 0,
+      },
+    ];
+  } else {
+    // FEFO mode
+    selectedBatches = await selectFEFO(itemId, warehouseId, quantity, {
+      includeExpired: allowExpired,
+    });
+  }
 
   // 3) خصم الكميات بالتسلسل (لأن MongoDB standalone لا يدعم Transactions).
   const now = new Date();
   const issued = [];
 
-  for (const batch of selectedBatches) {
+  for (const b of selectedBatches) {
     try {
       // نستخدم updateOne مع شرط quantity >= take لضمان عدم الصرف المزدوج
       // في حال طلبات متزامنة (Race Condition Guard).
       const result = await Stock.updateOne(
         {
-          _id: batch.stockId,
-          quantity: { $gte: batch.quantity },
+          _id: b.stockId,
+          quantity: { $gte: b.quantity },
         },
         {
-          $inc: { quantity: -batch.quantity },
+          $inc: { quantity: -b.quantity },
           $set: { lastIssuedAt: now },
         }
       );
@@ -113,25 +170,24 @@ export async function issueStock({ itemId, warehouseId, quantity, allowExpired =
       if (result.modifiedCount !== 1) {
         // فشل التعديل (سباق أو تغيير خارجي).
         logger.error(
-          `فشل خصم دفعة ${batch.batch}: modifiedCount=${result.modifiedCount}`
+          `فشل خصم دفعة ${b.batch}: modifiedCount=${result.modifiedCount}`
         );
         throw new AppError(
-          `فشل خصم الدفعة ${batch.batch} — قد يكون هناك طلب متزامن. أعد المحاولة.`,
+          `فشل خصم الدفعة ${b.batch} — قد يكون هناك طلب متزامن. أعد المحاولة.`,
           409,
           'ISSUE_CONFLICT'
         );
       }
 
       issued.push({
-        stockId: batch.stockId,
-        batch: batch.batch,
-        expiry: batch.expiry,
-        quantity: batch.quantity,
-        unitCost: batch.unitCost || 0,
+        stockId: b.stockId,
+        batch: b.batch,
+        expiry: b.expiry,
+        quantity: b.quantity,
+        unitCost: b.unitCost || 0,
       });
     } catch (error) {
-      logger.error(`خطأ أثناء خصم دفعة ${batch.batch}: ${error.message}`);
-      // نرمي الخطأ كـ AppError ليصل للـ Controller بشكل موحّد.
+      logger.error(`خطأ أثناء خصم دفعة ${b.batch}: ${error.message}`);
       if (error instanceof AppError) throw error;
       throw new AppError('فشل صرف المخزون. أعد المحاولة.', 500, 'ISSUE_FAILED');
     }
@@ -181,7 +237,6 @@ export async function returnStock({ itemId, warehouseId, batch, quantity, meta =
   const now = new Date();
 
   try {
-    // findOneAndUpdate مع upsert: يُنشئ إن لم يوجد، ويحدّث إن وُجد.
     const updated = await Stock.findOneAndUpdate(
       { item: itemId, warehouse: warehouseId, batch: normalizedBatch },
       {
@@ -242,32 +297,23 @@ export async function getAvailableQuantity(itemId, warehouseId) {
 // ============================================================
 
 /**
- * صرف كمية من صنف قد تحتاج دفعات متعددة.
+ * صرف كميات من عدة أصناف (سطور الفاتورة).
  *
  * ⚠️ هذه الدالة تختلف عن `issueStock` في التالي:
  * - `issueStock` تُرجع الدفعات المختارة (لتُخزَّن في الفاتورة).
  * - `bulkIssueStock` تُغلّف كل السطور في فاتورة واحدة (تستدعي `issueStock` عدة مرات).
  *
+ * ✅ Phase A.10: كل سطر قد يحمل `batch` محدد (manual mode) أو `null` (FEFO).
+ *
  * @async
  * @param {Object} params
- * @param {Array<{itemId, quantity}>} params.lines - سطور الفاتورة.
+ * @param {Array<{itemId, quantity, batch?}>} params.lines - سطور الفاتورة.
+ *   - `batch` (اختياري): رقم الدفعة المحددة (manual mode).
+ *   - إذا `null`/محذوف → FEFO.
  * @param {string} params.warehouseId
  * @param {boolean} [params.allowExpired=false]
  * @returns {Promise<Array<{itemId, issuedBatches}>>}
  * @throws {AppError} إن فشل أي سطر (نُعيد الخطأ كاملاً).
- *
- * @example
- * const result = await bulkIssueStock({
- *   warehouseId: '...',
- *   lines: [
- *     { itemId: '...', quantity: 10 },
- *     { itemId: '...', quantity: 5 },
- *   ],
- * });
- * // result = [
- * //   { itemId: '...', issuedBatches: [{ stockId, batch, expiry, quantity, unitCost }] },
- * //   { itemId: '...', issuedBatches: [{ stockId, batch, expiry, quantity, unitCost }] },
- * // ]
  */
 export async function bulkIssueStock({ warehouseId, lines, allowExpired = false }) {
   if (!Array.isArray(lines) || lines.length === 0) {
@@ -284,6 +330,7 @@ export async function bulkIssueStock({ warehouseId, lines, allowExpired = false 
       itemId: line.itemId,
       warehouseId,
       quantity: line.quantity,
+      batch: line.batch || null,   // ⚠️ Phase A.10: batch محدد (اختياري)
       allowExpired,
     });
 

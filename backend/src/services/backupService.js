@@ -3,11 +3,9 @@
  * @description
  * خدمة النسخ الاحتياطي والاستعادة (JSON) + عرض النسخ المحفوظة.
  *
- * المبادئ:
- *  - AuditLog مستبعَد دائماً (سجل غير قابل للاستعادة).
- *  - كلمة المرور مشمولة (نقرأ raw من collection، لا Mongoose).
- *  - Restore: deleteMany + insertMany (يحافظ على _id).
- *  - listLocalBackups: يقرأ من BACKUP_DIR (من .env).
+ * ✅ 🅱 (2026-11-08):
+ * - حذف DeliveryNote من MODELS.
+ * - حذف import DeliveryNote.
  */
 
 import fs from 'node:fs/promises';
@@ -25,7 +23,6 @@ import Supplier from '../models/Supplier.js';
 import Customer from '../models/Customer.js';
 import Stock from '../models/Stock.js';
 import Invoice from '../models/Invoice.js';
-import DeliveryNote from '../models/DeliveryNote.js';
 import CustomerReturn from '../models/CustomerReturn.js';
 import SupplierReturn from '../models/SupplierReturn.js';
 import PurchaseReceipt from '../models/PurchaseReceipt.js';
@@ -33,7 +30,6 @@ import Commission from '../models/Commission.js';
 import SalesRepTransaction from '../models/SalesRepTransaction.js';
 import CashFund from '../models/CashFund.js';
 import BankAccount from '../models/BankAccount.js';
-import Check from '../models/Check.js';
 import CashTransaction from '../models/CashTransaction.js';
 import AccountingEntry from '../models/AccountingEntry.js';
 
@@ -55,14 +51,12 @@ const MODELS = [
   { name: 'purchaseReceipts', Model: PurchaseReceipt },
   { name: 'stocks', Model: Stock },
   { name: 'invoices', Model: Invoice },
-  { name: 'deliveryNotes', Model: DeliveryNote },
   { name: 'customerReturns', Model: CustomerReturn },
   { name: 'supplierReturns', Model: SupplierReturn },
   { name: 'commissions', Model: Commission },
   { name: 'salesRepTransactions', Model: SalesRepTransaction },
   { name: 'cashFunds', Model: CashFund },
   { name: 'bankAccounts', Model: BankAccount },
-  { name: 'checks', Model: Check },
   { name: 'cashTransactions', Model: CashTransaction },
   { name: 'accountingEntries', Model: AccountingEntry },
   { name: 'notifications', Model: Notification },
@@ -72,18 +66,12 @@ const MODELS = [
  * 1) Export — بناء ملف JSON
  * ═════════════════════════════════════════════════════════════ */
 
-/**
- * إنشاء نسخة احتياطية كاملة (JSON Buffer).
- * @param {Object} opts
- * @param {Object} opts.user
- * @returns {Promise<{ buffer: Buffer, filename: string, counts: Object, size: number }>}
- */
 export async function exportAll({ user } = {}) {
   const startedAt = Date.now();
   const payload = {
     _meta: {
       app: 'Pharma System',
-      version: '5.0.0',
+      version: '5.1.0',
       exportedAt: new Date().toISOString(),
       exportedBy: user?.email || 'unknown',
       collections: {},
@@ -128,10 +116,6 @@ export async function exportAll({ user } = {}) {
  * 2) Info — حجم تقديري
  * ═════════════════════════════════════════════════════════════ */
 
-/**
- * معلومات عن البيانات الحالية (counts + حجم تقديري).
- * @returns {Promise<Object>}
- */
 export async function getInfo() {
   const counts = {};
   let total = 0;
@@ -157,16 +141,6 @@ export async function getInfo() {
  * 3) Restore — استعادة من JSON
  * ═════════════════════════════════════════════════════════════ */
 
-/**
- * استعادة بيانات كاملة من ملف JSON.
- *
- * ⚠️ خطير: يمسح كل المجموعات (عدا AuditLog) ثم يستعيد من الملف.
- *
- * @param {Object} payload - { _meta, data }
- * @param {Object} opts
- * @param {Object} opts.user
- * @returns {Promise<{ results: Object, duration: number, totals: Object }>}
- */
 export async function restoreAll(payload, { user } = {}) {
   if (!payload || typeof payload !== 'object' || !payload.data) {
     const err = new Error('الملف غير صالح: يجب أن يحتوي على مفتاح data.');
@@ -238,13 +212,9 @@ export async function restoreAll(payload, { user } = {}) {
 }
 
 /* ═════════════════════════════════════════════════════════════
- * 4) List Local Backups — عرض النسخ المحفوظة
+ * 4) List Local Backups
  * ═════════════════════════════════════════════════════════════ */
 
-/**
- * قائمة النسخ المحفوظة على القرص.
- * @returns {Promise<Array<{filename, size, createdAt}>>}
- */
 export async function listLocalBackups() {
   const BACKUP_DIR =
     process.env.BACKUP_DIR || 'E:\\Backups\\Pharma\\daily';

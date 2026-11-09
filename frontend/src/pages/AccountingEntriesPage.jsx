@@ -4,6 +4,10 @@
  * صفحة عرض القيود المحاسبية.
  * - قائمة القيود
  * - عرض تفاصيل القيد (مدين/دائن)
+ *
+ * ✅ 🅲 (2026-11-08):
+ * - حُذفت 5 أسطر CHECK_* من entryTypeLabels:
+ *   CHECK_RECEIVED, CHECK_COLLECTED, CHECK_BOUNCED, CHECK_ISSUED, CHECK_PAID.
  */
 
 import { useState, useEffect } from 'react';
@@ -13,6 +17,9 @@ import Loading from '../components/UI/Loading.jsx';
 import Modal from '../components/UI/Modal.jsx';
 import { formatCurrency, formatDate } from '../utils/formatters.js';
 
+/**
+ * ✅ 🅲: حُذفت 5 أنواع CHECK_* (Check أُلغي).
+ */
 const entryTypeLabels = {
   SALE_CASH: 'بيع نقدي',
   SALE_CREDIT: 'بيع آجل',
@@ -20,11 +27,7 @@ const entryTypeLabels = {
   CUSTOMER_PAYMENT: 'تحصيل عميل',
   PURCHASE: 'مشتريات',
   PURCHASE_RETURN: 'مرتجع مشتريات',
-  CHECK_RECEIVED: 'استلام شيك',
-  CHECK_COLLECTED: 'تحصيل شيك',
-  CHECK_BOUNCED: 'ارتداد شيك',
-  CHECK_ISSUED: 'إصدار شيك',
-  CHECK_PAID: 'صرف شيك',
+  // ⚠️ 🅲: حُذفت CHECK_RECEIVED / CHECK_COLLECTED / CHECK_BOUNCED / CHECK_ISSUED / CHECK_PAID
   CASH_TRANSFER: 'تحويل صندوق',
   CASH_DEPOSIT: 'إيداع نقدي',
   CASH_WITHDRAWAL: 'سحب نقدي',
@@ -172,7 +175,7 @@ const AccountingEntriesPage = () => {
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
                 <p className="text-gray-500">النوع</p>
-                <p className="font-medium">{entryTypeLabels[selectedEntry.entryType]}</p>
+                <p className="font-medium">{entryTypeLabels[selectedEntry.entryType] || selectedEntry.entryType}</p>
               </div>
               <div>
                 <p className="text-gray-500">التاريخ</p>

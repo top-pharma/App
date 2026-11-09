@@ -5,6 +5,10 @@
  *
  * ⚠️ B3 (Phase B): زر "حسابي" يفتح Modal ببيانات المستخدم
  *    بدلاً من الانتقال إلى /settings (غير موجود).
+ *
+ * ✅ الخيار A (2026-11-09):
+ * - إضافة اللوغو (/logo.png) في Header (بجانب "نظام Pharma")
+ * - إضافة onError لإخفاء الصورة إن لم توجد
  */
 
 import { useEffect, useState } from 'react';
@@ -113,7 +117,7 @@ function Header({ onMenuClick }) {
   return (
     <>
       <header className="h-16 bg-white border-b border-neutral-200 flex items-center justify-between px-4 md:px-6 flex-shrink-0 sticky top-0 z-20">
-        {/* ─── اليسار: زر القائمة ─── */}
+        {/* ─── اليسار: زر القائمة + الشعار ─── */}
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -123,9 +127,21 @@ function Header({ onMenuClick }) {
           >
             <Menu size={20} />
           </button>
-          <div className="hidden sm:block">
-            <p className="text-xs text-neutral-500">مرحباً بك في</p>
-            <p className="text-sm font-bold text-neutral-900">نظام Pharma</p>
+
+          {/* ✅ الخيار A: اللوغو + النص */}
+          <div className="flex items-center gap-2 min-w-0">
+            <img
+              src="/logo.png"
+              alt="شعار TOP PHARMA"
+              className="w-9 h-9 object-contain flex-shrink-0"
+              onError={(e) => {
+                e.target.style.display = 'none';
+              }}
+            />
+            <div className="hidden sm:block min-w-0">
+              <p className="text-xs text-neutral-500">مرحباً بك في</p>
+              <p className="text-sm font-bold text-neutral-900">نظام Pharma</p>
+            </div>
           </div>
         </div>
 

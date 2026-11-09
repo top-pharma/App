@@ -8,16 +8,28 @@
  * - الروابط الخاصة (صيدلياتي، فواتيري) = role + permission.
  * - Backup link أُضيف (settings.update).
  * - لا يوجد isAdmin/isStorekeeper... — استُبدلت بـ hasPermission.
+ *
+ * ✅ 🅱 (2026-11-08):
+ * - حذف `Truck` من imports (لم يعد مستخدماً — كان في رابط إيصالات التسليم).
+ * - حذف `'delivery_notes.view'` من canViewSales.
+ * - حذف رابط "إيصالات التسليم" من مجموعة المبيعات.
+ *
+ * ✅ 🅲 (2026-11-08):
+ * - حذف `useContext` من imports (لم يعد مستخدماً).
+ * - حذف `FileCheck` من imports.
+ * - حذف `import ChecksContext`.
+ * - حذف `checksCtx` + `pendingChecksCount`.
+ * - حذف رابط "الشيكات" من مجموعة المالية.
  */
 
-import { useState, useContext } from 'react';
+import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
   Package,
   ShoppingCart,
   FileText,
-  Truck,
+  // ⚠️ 🅱: حُذف Truck
   Undo2,
   Users,
   Building2,
@@ -33,18 +45,17 @@ import {
   Coins,
   Bell,
   Landmark,
-  FileCheck,
+  // ⚠️ 🅲: حُذف FileCheck
   ScrollText,
   BarChart3,
   TrendingUp,
   UserCog,
   Database,
   Settings,
-
 } from 'lucide-react';
 
 import { useAuth } from '../../hooks/useAuth.js';
-import ChecksContext from '../../context/ChecksContext.jsx';
+// ⚠️ 🅲: حُذف import ChecksContext
 import { useNotifications } from '../../hooks/useNotifications.js';
 import { ROLE_LABELS_AR } from '../../utils/constants.js';
 
@@ -122,10 +133,7 @@ function Sidebar() {
   const { userRole, isSalesRep, isPharmacy, hasPermission } = useAuth();
   const location = useLocation();
 
-  const checksCtx = useContext(ChecksContext);
-  const pendingChecksCount = checksCtx
-    ? (checksCtx.overdue?.length || 0) + (checksCtx.upcoming?.length || 0)
-    : 0;
+  // ⚠️ 🅲: حُذف checksCtx + pendingChecksCount
 
   const { unreadCount } = useNotifications();
 
@@ -144,7 +152,7 @@ function Sidebar() {
 
   const canViewSales = canAny([
     'invoices.view',
-    'delivery_notes.view',
+    // ⚠️ 🅱: حُذف 'delivery_notes.view'
     'customer_returns.view',
   ]);
 
@@ -157,7 +165,7 @@ function Sidebar() {
     'finance.view',
     'finance.transactions.view',
     'finance.entries.view',
-    'finance.checks.manage',
+    // ⚠️ 🅲: حُذف 'finance.checks.manage'
   ]);
 
   const canViewReports = hasPermission('reports.view');
@@ -225,9 +233,7 @@ function Sidebar() {
             {hasPermission('invoices.view') && (
               <SidebarLink to="/sales/invoices" icon={FileText} label="الفواتير" />
             )}
-            {hasPermission('delivery_notes.view') && (
-              <SidebarLink to="/sales/delivery-notes" icon={Truck} label="إيصالات التسليم" />
-            )}
+            {/* ⚠️ 🅱: حُذف رابط "إيصالات التسليم" */}
             {hasPermission('customer_returns.view') && (
               <SidebarLink to="/sales/customer-returns" icon={Undo2} label="مرتجعات العملاء" />
             )}
@@ -269,14 +275,7 @@ function Sidebar() {
             {hasPermission('finance.view') && (
               <SidebarLink to="/finance/bank-accounts" icon={Landmark} label="الحساب البنكي" />
             )}
-            {hasPermission('finance.view') && (
-              <SidebarLink
-                to="/finance/checks"
-                icon={FileCheck}
-                label="الشيكات"
-                badge={pendingChecksCount}
-              />
-            )}
+            {/* ⚠️ 🅲: حُذف رابط "الشيكات" */}
             {hasPermission('finance.transactions.view') && (
               <SidebarLink to="/finance/cash-transactions" icon={Receipt} label="الحركات النقدية" />
             )}
@@ -297,7 +296,7 @@ function Sidebar() {
             <SidebarLink to="/reports/finance" icon={Wallet} label="التقارير المالية" />
             <SidebarLink to="/reports/sales" icon={TrendingUp} label="تقارير المبيعات" />
             <SidebarLink to="/reports/customers" icon={Users} label="تقارير العملاء" />
-            <SidebarLink to="/reports/suppliers" icon={Truck} label="تقارير الموردين" />
+            <SidebarLink to="/reports/suppliers" icon={Store} label="تقارير الموردين" />
             <SidebarLink to="/reports/inventory" icon={Package} label="تقارير المخزون" />
           </SidebarGroup>
         )}
@@ -322,12 +321,11 @@ function Sidebar() {
           <SidebarLink to="/backup" icon={Database} label="النسخ الاحتياطي" />
         )}
 
-        
         {/* الإعدادات — D5 */}
         {hasPermission('settings.view') && (
           <SidebarLink to="/settings" icon={Settings} label="الإعدادات" />
         )}
-        
+
         {/* روابط خاصة */}
         {canViewMyPharmacies && (
           <SidebarLink to="/inventory/customers" icon={Store} label="صيدلياتي" />

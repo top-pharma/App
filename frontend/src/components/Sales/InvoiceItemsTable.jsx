@@ -204,7 +204,7 @@ function InvoiceItemsTable({
                       onChange={(e) => updateItem(index, 'quantity', e.target.value)}
                       disabled={disabled}
                       min="0.0001"
-                      step="0.01"
+                      step="any"
                       className="w-full px-2 py-1.5 text-center rounded border border-neutral-300 text-sm numeric focus:outline-none focus:ring-2 focus:ring-primary-200 disabled:bg-neutral-100"
                     />
                   </td>
@@ -222,7 +222,7 @@ function InvoiceItemsTable({
                       onChange={(e) => updateItem(index, 'unitPrice', e.target.value)}
                       disabled={disabled}
                       min="0"
-                      step="0.01"
+                      step="any"
                       className="w-full px-2 py-1.5 text-left rounded border border-neutral-300 text-sm numeric focus:outline-none focus:ring-2 focus:ring-primary-200 disabled:bg-neutral-100"
                     />
                   </td>

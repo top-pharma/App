@@ -5,6 +5,14 @@
  *
  * ⚠️ كل المسارات المحمية (بما فيها /notifications و /backup)
  *    يجب أن تكون داخل <Route element={<Layout />}>.
+ *
+ * ✅ 🅱 (2026-11-08):
+ * - حذف `DeliveryNotes` (lazy import).
+ * - حذف route `/sales/delivery-notes`.
+ *
+ * ✅ 🅲 (2026-11-08):
+ * - حذف `ChecksPage` + `CheckDetailPage` (lazy imports).
+ * - حذف routes `/finance/checks` + `/finance/checks/:id`.
  */
 
 import { lazy, Suspense } from 'react';
@@ -45,7 +53,7 @@ const Stock = lazy(() => import('../pages/Stock.jsx'));
 const Sales = lazy(() => import('../pages/Sales.jsx'));
 const Invoices = lazy(() => import('../pages/Invoices.jsx'));
 const InvoiceDetail = lazy(() => import('../pages/InvoiceDetail.jsx'));
-const DeliveryNotes = lazy(() => import('../pages/DeliveryNotes.jsx'));
+// ⚠️ 🅱: حُذف DeliveryNotes
 const CustomerReturns = lazy(() => import('../pages/CustomerReturns.jsx'));
 const PurchaseReceipts = lazy(() => import('../pages/PurchaseReceipts.jsx'));
 const SupplierReturns = lazy(() => import('../pages/SupplierReturns.jsx'));
@@ -56,8 +64,8 @@ const SupplierReturns = lazy(() => import('../pages/SupplierReturns.jsx'));
 const FinancePage = lazy(() => import('../pages/FinancePage.jsx'));
 const CashFundsPage = lazy(() => import('../pages/CashFundsPage.jsx'));
 const BankAccountsPage = lazy(() => import('../pages/BankAccountsPage.jsx'));
-const ChecksPage = lazy(() => import('../pages/ChecksPage.jsx'));
-const CheckDetailPage = lazy(() => import('../pages/CheckDetailPage.jsx'));
+// ⚠️ 🅲: حُذف ChecksPage
+// ⚠️ 🅲: حُذف CheckDetailPage
 const CashTransactionsPage = lazy(() => import('../pages/CashTransactionsPage.jsx'));
 const AccountingEntriesPage = lazy(() => import('../pages/AccountingEntriesPage.jsx'));
 
@@ -164,7 +172,7 @@ function AppRoutes() {
           <Route path="sales" element={<Sales />} />
           <Route path="sales/invoices" element={<Invoices />} />
           <Route path="sales/invoices/:id" element={<InvoiceDetail />} />
-          <Route path="sales/delivery-notes" element={<DeliveryNotes />} />
+          {/* ⚠️ 🅱: حُذف route `sales/delivery-notes` */}
           <Route path="sales/customer-returns" element={<CustomerReturns />} />
           <Route path="sales/purchase-receipts" element={<PurchaseReceipts />} />
           <Route path="sales/supplier-returns" element={<SupplierReturns />} />
@@ -173,8 +181,8 @@ function AppRoutes() {
           <Route path="finance" element={<FinancePage />} />
           <Route path="finance/cash-funds" element={<CashFundsPage />} />
           <Route path="finance/bank-accounts" element={<BankAccountsPage />} />
-          <Route path="finance/checks" element={<ChecksPage />} />
-          <Route path="finance/checks/:id" element={<CheckDetailPage />} />
+          {/* ⚠️ 🅲: حُذف route `finance/checks` */}
+          {/* ⚠️ 🅲: حُذف route `finance/checks/:id` */}
           <Route path="finance/cash-transactions" element={<CashTransactionsPage />} />
           <Route path="finance/accounting-entries" element={<AccountingEntriesPage />} />
 

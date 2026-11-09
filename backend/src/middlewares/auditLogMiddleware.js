@@ -21,6 +21,7 @@ import { logger } from '../utils/logger.js';
  * @returns {string}
  */
 const getClientIp = (req) => {
+  if (!req || !req.headers) return '';
   const forwarded = req.headers['x-forwarded-for'];
   if (typeof forwarded === 'string' && forwarded.length > 0) {
     return forwarded.split(',')[0].trim();
@@ -34,6 +35,7 @@ const getClientIp = (req) => {
  * @returns {string}
  */
 const getUserAgent = (req) => {
+  if (!req || !req.headers) return '';
   const ua = req.headers['user-agent'];
   return typeof ua === 'string' ? ua.slice(0, 500) : '';
 };
@@ -289,10 +291,10 @@ export const logAuditEvent = async ({
     changes: meta?.changes || null,
     errorCode: meta?.errorCode || '',
     errorMessage: meta?.errorMessage || '',
-    ip: req ? getClientIp(req) : '',
-    userAgent: req ? getUserAgent(req) : '',
-    method: req?.method || '',
-    path: req?.originalUrl || '',
+   ip: getClientIp(req),        // ← آمن داخلياً (return '' إذا req = undefined)
+userAgent: getUserAgent(req), // ← آمن داخلياً
+method: req?.method || '',
+path: req?.originalUrl || '',
     occurredAt: new Date(),
   });
 };

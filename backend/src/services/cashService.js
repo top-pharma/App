@@ -34,7 +34,7 @@ const round2 = (amount) => Math.round((Number(amount) + Number.EPSILON) * 100) /
  * @param {Object} params
  * @param {string} params.direction - 'in' | 'out'
  * @param {number} params.amount
- * @param {string} [params.method='cash'] - 'cash' | 'bank' | 'check'
+ * @param {string} [params.method='cash'] - 'cash' | 'bank' 
  * @param {string} [params.cashFundId]
  * @param {string} [params.bankAccountId]
  * @param {Date} [params.transactionDate]
@@ -68,7 +68,7 @@ export const createCashTransaction = async ({
   if (roundedAmount <= 0) {
     throw new AppError('المبلغ يجب أن يكون أكبر من صفر', 400, 'INVALID_AMOUNT');
   }
-  if (!['cash', 'bank', 'check'].includes(method)) {
+  if (!['cash', 'bank'].includes(method)) {
     throw new AppError('طريقة الدفع غير صحيحة', 400, 'INVALID_METHOD');
   }
 
@@ -100,7 +100,6 @@ export const createCashTransaction = async ({
       throw new AppError('الحساب البنكي معطّل', 400, 'BANK_ACCOUNT_INACTIVE');
     }
   }
-  // method === 'check' → لا targetDoc (لا يؤثر على رصيد)
 
   // ─── 3) التحقق من كفاية الرصيد (للصرف) ───
   if (direction === 'out' && targetDoc) {
@@ -279,10 +278,6 @@ const createEntryForTransaction = async ({
           description: tx.description,
         });
       }
-      break;
-
-    case 'check':
-      // checkService يُنشئ القيد يدوياً (skipEntry=true)
       break;
 
     case 'manual':

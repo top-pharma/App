@@ -28,11 +28,9 @@ const { Schema, model } = mongoose;
 export const CASH_TRANSACTION_REFERENCE_TYPES = Object.freeze([
   'manual',            // حركة يدوية (إيداع/سحب)
   'invoice',           // دفعة على فاتورة
-  'delivery_note',     // دفعة أولى في إيصال تسليم
   'customer_return',   // رد نقدي لمرتجع عميل
   'purchase',          // دفعة على مشتريات
   'supplier_return',   // استرداد من مرتجع مورد
-  'check',             // صرف/تحصيل شيك
   'transfer',          // تحويل بين صناديق
   'expense',           // مصروف
 ]);
@@ -97,12 +95,11 @@ const cashTransactionSchema = new Schema(
      * طريقة الدفع.
      * cash  → يُحدّث CashFund
      * bank  → يُحدّث BankAccount
-     * check → لا يُحدّث أي رصيد (الشيك يُعالَج لاحقاً عند الصرف)
      */
     method: {
       type: String,
       enum: {
-        values: ['cash', 'bank', 'check'],
+        values: ['cash', 'bank'],
         message: 'طريقة الدفع يجب أن تكون cash أو bank أو check.',
       },
       default: 'cash',
@@ -237,7 +234,7 @@ cashTransactionSchema.virtual('signedAmount').get(function signedAmount() {
  * الهدف (صندوق أو بنك).
  */
 cashTransactionSchema.virtual('targetType').get(function targetType() {
-  return this.method === 'cash' ? 'CashFund' : this.method === 'bank' ? 'BankAccount' : 'Check';
+  return this.method === 'cash' ? 'CashFund' : 'BankAccount';
 });
 
 // تفعيل virtuals في toJSON / toObject

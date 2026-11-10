@@ -2,13 +2,13 @@
  * @file customerReturnsAPI.js
  * @description دوال API الخاصة بمرتجعات العملاء (Customer Returns).
  *
- * لماذا هذا الملف؟
- * - يفصل منطق الاتصال بالخادم عن المكونات.
- * - يُوحّد شكل الاستدعاءات مع بقية ملفات API.
- * - يدعم دورة حياة المرتجع (إنشاء ← موافقة/رفض).
+ * ✅ 🅳 (2026-11-09):
+ * - listCustomerReturns → normalizeListWithId(data) — { items, pagination }
+ *   (كان: return data.data — يُرجع مصفوفة فقط، ويفقد pagination)
  */
 
 import axiosInstance from './axiosInstance.js';
+import { normalizeListWithId } from './_helpers.js';
 
 // ═══════════════════════════════════════════════
 // 1. القراءة (Read)
@@ -22,7 +22,8 @@ import axiosInstance from './axiosInstance.js';
  */
 export async function listCustomerReturns(params = {}) {
   const { data } = await axiosInstance.get('/customer-returns', { params });
-  return data.data;
+  // ✅ 🅳: normalizeListWithId(data) — { items, pagination }
+  return normalizeListWithId(data);
 }
 
 /**
@@ -89,4 +90,4 @@ export default {
   createCustomerReturn,
   approveCustomerReturn,
   rejectCustomerReturn,
-}
+};

@@ -103,6 +103,7 @@ function CustomerReturnsPage() {
     error,
     stats,
     fetchCustomerReturns,
+     fetchStats,
     approveCustomerReturn,
     rejectCustomerReturn,
     resetError,
@@ -158,6 +159,11 @@ function CustomerReturnsPage() {
     loadCustomerReturns();
   }, [loadCustomerReturns]);
 
+  // ✅ تحميل stats عند mount (لإصلاح KPIs = 0)
+useEffect(() => {
+  fetchStats?.();
+}, [fetchStats]);
+
   // ─── إعادة تعيين الفلاتر ───
   const handleClearFilters = () => {
     setSearch('');
@@ -173,6 +179,7 @@ function CustomerReturnsPage() {
     setIsFormOpen(false);
     toast.success('تم إنشاء المرتجع بنجاح.');
     loadCustomerReturns();
+    fetchStats?.()
   };
 
   // ─── فتح مودال الموافقة ───
@@ -203,6 +210,7 @@ function CustomerReturnsPage() {
       toast.success('تمت الموافقة على المرتجع.');
       setApproveTarget(null);
       loadCustomerReturns();
+      fetchStats?.();
     } else {
       toast.error(result.error);
     }
@@ -230,6 +238,7 @@ function CustomerReturnsPage() {
       toast.success('تم رفض المرتجع.');
       setRejectTarget(null);
       loadCustomerReturns();
+      fetchStats?.();
     } else {
       toast.error(result.error);
     }

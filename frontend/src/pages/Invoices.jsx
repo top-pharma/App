@@ -1,16 +1,23 @@
 /**
  * @file InvoicesPage.jsx
- * @description صفحة الفواتير — Phase 2.5 (دعم المسودات).
+ * @description صفحة الفواتير — Phase 2.5 (دعم الفواتير المبدئية).
  *
  * ✅ Phase A.8: listInvoices يعيد { items, pagination }.
  * ✅ 🅳: زر "إنشاء فاتورة" + auto-open via location.state.openCreateForm.
+ * ✅ 🅵 (2026-11-10):
+ * - إضافة زر "إنشاء فاتورة مبدئية" (Modal مستقل).
+ * - إضافة onSubmitDraft في Modal "إنشاء فاتورة".
+ * - إضافة أزرار "دفع" و"إلغاء" في عمود الإجراءات.
+ * - استدعاء fetchStats عند mount (لإصلاح KPIs = 0).
+ * - استبدال "مسودة" → "فاتورة مبدئية" في StatusBadge.
+ * - إصلاح dueDate = 1970 (null handling).
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   Plus, FileText, Search, X, Eye, AlertCircle, Clock, CheckCircle2, Ban,
-  FileEdit, Send,
+  FileEdit, Send, Banknote, XCircle,
 } from 'lucide-react';
 
 import { useAuth } from '../hooks/useAuth.js';
@@ -28,9 +35,13 @@ import { INVOICE_STATUS_LABELS_AR, PAYMENT_TYPE_LABELS_AR } from '../utils/const
 import { formatCurrency, formatDate, formatNumber } from '../utils/formatters.js';
 import * as invoicesAPI from '../api/invoicesAPI.js';
 
+// ═══════════════════════════════════════════════
+// 1. مكونات فرعية
+// ═══════════════════════════════════════════════
+
 function StatusBadge({ status }) {
   const map = {
-    draft: { label: 'مسودة', class: 'bg-neutral-200 text-neutral-700', icon: FileEdit },
+    draft: { label: 'فاتورة مبدئية', class: 'bg-neutral-200 text-neutral-700', icon: FileEdit },
     pending: { label: 'معلقة', class: 'bg-warning-100 text-warning-800', icon: Clock },
     paid: { label: 'مدفوعة', class: 'bg-success-100 text-success-800', icon: CheckCircle2 },
     partial: { label: 'مدفوعة جزئياً', class: 'bg-info-100 text-info-800', icon: Clock },
@@ -60,13 +71,20 @@ function MiniStat({ label, value, color = 'primary' }) {
   );
 }
 
+// ═══════════════════════════════════════════════
+// 2. المكون الرئيسي
+// ═══════════════════════════════════════════════
+
 function InvoicesPage() {
   const { isAdmin, isAccountant, isSalesRep } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
-  const location = useLocation();  // ✅ 🅳: auto-open
+  const location = useLocation();
 
-  const { invoices, pagination, loading, error, stats, fetchInvoices, resetError } = useInvoices();
+  const {
+    invoices, pagination, loading, error, stats,
+    fetchInvoices, fetchStats, resetError,
+  } = useInvoices();
 
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -75,16 +93,21 @@ function InvoicesPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [currentLimit, setCurrentLimit] = useState(10);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isDraftFormOpen, setIsDraftFormOpen] = useState(false);
 
   // ✅ 🅳: فتح نموذج الإنشاء تلقائياً عند الوصول من Dashboard
   useEffect(() => {
     if (location.state?.openCreateForm) {
       setIsFormOpen(true);
-      // نظّف الـ state حتى لا يُفتح مرة أخرى عند reload
       navigate(location.pathname, { replace: true, state: {} });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state]);
+
+  // ✅ 🅵: تحميل stats عند mount (لإصلاح KPIs = 0)
+  useEffect(() => {
+    fetchStats?.();
+  }, [fetchStats]);
 
   useEffect(() => {
     const t = setTimeout(() => { setDebouncedSearch(search); setCurrentPage(1); }, 300);
@@ -111,7 +134,17 @@ function InvoicesPage() {
 
   const handleCreateSuccess = () => {
     setIsFormOpen(false);
+    setIsDraftFormOpen(false);
     loadInvoices();
+    fetchStats?.();
+  };
+
+  // ✅ إصلاح dueDate = 1970
+  const formatDueDate = (dueDate) => {
+    if (!dueDate) return '—';
+    const d = new Date(dueDate);
+    if (Number.isNaN(d.getTime()) || d.getFullYear() < 2000) return '—';
+    return formatDate(dueDate);
   };
 
   const columns = [
@@ -139,7 +172,7 @@ function InvoicesPage() {
     {
       key: 'dueDate', label: 'الاستحقاق',
       render: (row) => (
-        <span className="text-sm">{row.dueDate ? formatDate(row.dueDate) : '—'}</span>
+        <span className="text-sm">{formatDueDate(row.dueDate)}</span>
       ),
     },
     {
@@ -162,25 +195,40 @@ function InvoicesPage() {
     },
     {
       key: 'actions', label: 'إجراءات', align: 'center',
-      render: (row) => (
-        <div className="flex items-center justify-center gap-1">
-          {row.status === 'draft' && (
-            <>
-              <Link to={`/sales/invoices/${row.id}`}>
-                <Button variant="ghost" size="sm" icon={FileEdit}>متابعة</Button>
-              </Link>
+      render: (row) => {
+        const isDraft = row.status === 'draft';
+        const isCancelled = row.status === 'cancelled';
+        const canPay = !isDraft && !isCancelled && row.remainingAmount > 0;
+        const canCancel = !isCancelled && (isDraft || row.paidAmount === 0);
+
+        return (
+          <div className="flex items-center justify-center gap-1 flex-wrap">
+            <Link to={`/sales/invoices/${row.id}`}>
+              <Button variant="ghost" size="sm" icon={isDraft ? FileEdit : Eye}>
+                {isDraft ? 'متابعة' : 'عرض'}
+              </Button>
+            </Link>
+
+            {isDraft && (
               <Link to={`/sales/invoices/${row.id}?finalize=1`}>
                 <Button variant="ghost" size="sm" icon={Send}>اعتماد</Button>
               </Link>
-            </>
-          )}
-          {row.status !== 'draft' && (
-            <Link to={`/sales/invoices/${row.id}`}>
-              <Button variant="ghost" size="sm" icon={Eye}>عرض</Button>
-            </Link>
-          )}
-        </div>
-      ),
+            )}
+
+            {canPay && (
+              <Link to={`/sales/invoices/${row.id}`}>
+                <Button variant="ghost" size="sm" icon={Banknote}>دفع</Button>
+              </Link>
+            )}
+
+            {canCancel && (
+              <Link to={`/sales/invoices/${row.id}`}>
+                <Button variant="ghost" size="sm" icon={XCircle}>إلغاء</Button>
+              </Link>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
@@ -191,16 +239,21 @@ function InvoicesPage() {
           <h1 className="text-2xl font-bold text-neutral-900 flex items-center gap-2">
             <FileText size={24} className="text-primary-700" />الفواتير
           </h1>
-          <p className="text-sm text-neutral-600 mt-1">إدارة فواتير المبيعات والمسودات</p>
+          <p className="text-sm text-neutral-600 mt-1">إدارة فواتير المبيعات والفواتير المبدئية</p>
         </div>
-        <Button variant="primary" icon={Plus} onClick={() => setIsFormOpen(true)}>
-          إنشاء فاتورة
-        </Button>
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" icon={FileEdit} onClick={() => setIsDraftFormOpen(true)}>
+            إنشاء فاتورة مبدئية
+          </Button>
+          <Button variant="primary" icon={Plus} onClick={() => setIsFormOpen(true)}>
+            إنشاء فاتورة
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <MiniStat label="الإجمالي" value={stats?.total || 0} color="primary" />
-        <MiniStat label="مسودات" value={stats?.drafts || 0} color="neutral" />
+        <MiniStat label="فواتير مبدئية" value={stats?.drafts || 0} color="neutral" />
         <MiniStat label="غير مدفوعة" value={stats?.unpaid || 0} color="warning" />
         <MiniStat label="متأخرة" value={stats?.overdue || 0} color="danger" />
         <MiniStat label="المعروض" value={pagination.total || 0} color="success" />
@@ -261,6 +314,7 @@ function InvoicesPage() {
           onLimitChange={(l) => { setCurrentLimit(l); setCurrentPage(1); }} />
       )}
 
+      {/* Modal: إنشاء فاتورة (نهائية) */}
       <Modal
         isOpen={isFormOpen}
         onClose={() => setIsFormOpen(false)}
@@ -279,7 +333,39 @@ function InvoicesPage() {
               toast.error(err?.error?.message || err?.message || 'فشل حفظ الفاتورة');
             }
           }}
+          onSubmitDraft={async (payload) => {
+            try {
+              await invoicesAPI.createDraftInvoice(payload);
+              handleCreateSuccess();
+              toast.success('تم حفظ الفاتورة المبدئية');
+            } catch (err) {
+              toast.error(err?.error?.message || err?.message || 'فشل حفظ الفاتورة المبدئية');
+            }
+          }}
           onClose={() => setIsFormOpen(false)}
+        />
+      </Modal>
+
+      {/* Modal: إنشاء فاتورة مبدئية */}
+      <Modal
+        isOpen={isDraftFormOpen}
+        onClose={() => setIsDraftFormOpen(false)}
+        title="إنشاء فاتورة مبدئية"
+        size="full"
+        closeOnOverlay={false}
+      >
+        <InvoiceForm
+          mode="new"
+          onSubmitDraft={async (payload) => {
+            try {
+              await invoicesAPI.createDraftInvoice(payload);
+              handleCreateSuccess();
+              toast.success('تم حفظ الفاتورة المبدئية');
+            } catch (err) {
+              toast.error(err?.error?.message || err?.message || 'فشل حفظ الفاتورة المبدئية');
+            }
+          }}
+          onClose={() => setIsDraftFormOpen(false)}
         />
       </Modal>
     </div>

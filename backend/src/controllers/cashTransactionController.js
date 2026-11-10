@@ -6,6 +6,10 @@
  *  - إنشاء حركة يدوية
  *  - عكس حركة
  *  - ملخص الحركات (للتقارير)
+ *
+ * ✅ 🅳 (2026-11-09):
+ * - listCashTransactions: إضافة referenceType + referenceId
+ *   (لجلب دفعات فاتورة محددة)
  */
 
 import CashTransaction from '../models/CashTransaction.js';
@@ -20,8 +24,8 @@ import { AUDIT_ACTIONS } from '../utils/constants.js';
 export const listCashTransactions = async (req, res, next) => {
   try {
     const {
-      page,
-      limit,
+      page = 1,
+      limit = 20,
       cashFundId,
       bankAccountId,
       method,
@@ -29,13 +33,21 @@ export const listCashTransactions = async (req, res, next) => {
       from,
       to,
       search,
+      // ✅ 🅳: فلترة حسب المرجع (لدفعات فاتورة محددة)
+      referenceType,
+      referenceId,
     } = req.query;
 
     const filter = {};
     if (cashFundId) filter.cashFundId = cashFundId;
     if (bankAccountId) filter.bankAccountId = bankAccountId;
-    if (method !== 'all') filter.method = method;
-    if (direction !== 'all') filter.direction = direction;
+    if (method && method !== 'all') filter.method = method;
+    if (direction && direction !== 'all') filter.direction = direction;
+
+    // ✅ 🅳: referenceType + referenceId
+    if (referenceType) filter.referenceType = referenceType;
+    if (referenceId) filter.referenceId = referenceId;
+
     if (from || to) {
       filter.transactionDate = {};
       if (from) filter.transactionDate.$gte = new Date(from);
@@ -45,15 +57,15 @@ export const listCashTransactions = async (req, res, next) => {
       filter.description = { $regex: search, $options: 'i' };
     }
 
-    const skip = (page - 1) * limit;
+    const skip = (Number(page) - 1) * Number(limit);
     const [transactions, total] = await Promise.all([
       CashTransaction.find(filter)
         .populate('cashFundId', 'name code')
         .populate('bankAccountId', 'bankName accountNumber')
-        .populate('createdBy', 'fullName email')
+        .populate('createdBy', 'name email')
         .sort({ transactionDate: -1 })
         .skip(skip)
-        .limit(limit)
+        .limit(Number(limit))
         .lean(),
       CashTransaction.countDocuments(filter),
     ]);
@@ -61,7 +73,12 @@ export const listCashTransactions = async (req, res, next) => {
     res.status(200).json({
       success: true,
       data: transactions,
-      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total,
+        totalPages: Math.ceil(total / Number(limit)),
+      },
     });
   } catch (error) {
     next(error);
@@ -76,7 +93,7 @@ export const getCashTransaction = async (req, res, next) => {
     const tx = await CashTransaction.findById(req.params.id)
       .populate('cashFundId', 'name code')
       .populate('bankAccountId', 'bankName accountNumber')
-      .populate('createdBy', 'fullName email');
+      .populate('createdBy', 'name email');
 
     if (!tx) {
       throw new AppError('الحركة غير موجودة', 404, 'TRANSACTION_NOT_FOUND');

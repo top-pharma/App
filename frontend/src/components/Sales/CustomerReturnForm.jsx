@@ -9,6 +9,13 @@
  * - المستخدم يختار البنود (كاملة/جزئية) + سبب لكل بند.
  * - لا يمس المخزون أو المال — يبقى "pending" حتى موافقة المحاسب.
  * - `invoiceDate`, `gracePeriodDays`, `isWithinGracePeriod` تُحسب في Backend.
+ *
+ * ✅ 🅳 C (2026-11-10):
+ * - استخدام remainingQuantity (بدل originalQuantity) — القابل للإرجاع الآن
+ *   (بعد خصم المرتجعات المعتمدة السابقة).
+ * - عرض originalQuantity + returnedQuantity + remainingQuantity.
+ * - max = remainingQuantity.
+ * - تعطيل البنود المُرجعة بالكامل (remainingQuantity === 0).
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -101,7 +108,13 @@ function CustomerReturnForm({ onSuccess, onCancel }) {
   const [selectedInvoice, setSelectedInvoice] = useState(null);
 
   // ─── البنود ───
-  // كل بند: { invoiceItemIndex, item, itemName, batch, originalQuantity, quantity, unitPrice, total, reason, note, selected }
+  // كل بند: {
+  //   invoiceItemIndex, item, itemName, batch,
+  //   originalQuantity,   // الكمية الأصلية في الفاتورة (للعرض فقط)
+  //   returnedQuantity,   // المُرجعة سابقاً (من getInvoice)
+  //   remainingQuantity,  // المتاح للإرجاع الآن = original - returned
+  //   quantity, unitPrice, total, reason, note, selected
+  // }
   const [returnItems, setReturnItems] = useState([]);
 
   // ─── طريقة التسوية والملاحظات ───
@@ -146,14 +159,15 @@ function CustomerReturnForm({ onSuccess, onCancel }) {
     const loadInvoices = async () => {
       setLoadingInvoices(true);
       try {
-        // نطلب فواتير غير ملغاة للصيدلية المختارة
         const result = await invoicesAPI.listInvoices({
           pharmacy: selectedCustomerId,
           limit: 100,
           sortBy: 'invoiceDate',
           sortOrder: 'desc',
         });
-        const active = (result.items || []).filter((inv) => inv.status !== 'cancelled');
+        const active = (result.items || []).filter(
+          (inv) => inv.status !== 'cancelled' && inv.status !== 'draft'
+        );
         setCustomerInvoices(active);
       } catch (err) {
         toast.error('فشل تحميل فواتير الصيدلية.');
@@ -168,6 +182,7 @@ function CustomerReturnForm({ onSuccess, onCancel }) {
 
   // ═══════════════════════════════════════════════
   // 5. عند اختيار الفاتورة → نُهيّئ البنود
+  // ✅ 🅳 C: نستخدم remainingQuantity ككمية قابلة للإرجاع
   // ═══════════════════════════════════════════════
   useEffect(() => {
     if (!selectedInvoiceId) {
@@ -181,21 +196,31 @@ function CustomerReturnForm({ onSuccess, onCancel }) {
         const inv = await invoicesAPI.getInvoice(selectedInvoiceId);
         setSelectedInvoice(inv);
 
-        // نُهيّئ البنود (كل بند غير محدد مبدئياً)
-        const items = (inv.items || []).map((it, idx) => ({
-          invoiceItemIndex: idx,
-          item: it.item,
-          itemName: it.item?.tradeName || '—',
-          batch: it.batch,
-          originalQuantity: it.quantity,
-          quantity: 0,
-          unit: it.unit || '',
-          unitPrice: it.unitPrice,
-          total: 0,
-          reason: 'damaged',
-          note: '',
-          selected: false,
-        }));
+        const items = (inv.items || []).map((it, idx) => {
+          const originalQty = Number(it.quantity) || 0;
+          const returnedQty = Number(it.returnedQuantity) || 0;
+          const remainingQty =
+            it.remainingQuantity !== undefined && it.remainingQuantity !== null
+              ? Number(it.remainingQuantity)
+              : Math.max(0, originalQty - returnedQty);
+
+          return {
+            invoiceItemIndex: idx,
+            item: it.item,
+            itemName: it.item?.tradeName || '—',
+            batch: it.batch,
+            originalQuantity: originalQty,
+            returnedQuantity: returnedQty,
+            remainingQuantity: remainingQty,
+            quantity: 0,
+            unit: it.unit || '',
+            unitPrice: it.unitPrice,
+            total: 0,
+            reason: 'damaged',
+            note: '',
+            selected: false,
+          };
+        });
         setReturnItems(items);
       } catch (err) {
         toast.error('فشل تحميل تفاصيل الفاتورة.');
@@ -224,13 +249,7 @@ function CustomerReturnForm({ onSuccess, onCancel }) {
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
     const isWithin = diffDays <= graceDays;
     const remainingDays = graceDays - diffDays;
-    return {
-      invoiceDate,
-      graceDays,
-      diffDays,
-      isWithin,
-      remainingDays,
-    };
+    return { invoiceDate, graceDays, diffDays, isWithin, remainingDays };
   }, [selectedInvoice, customer, returnDate]);
 
   // ═══════════════════════════════════════════════
@@ -241,12 +260,18 @@ function CustomerReturnForm({ onSuccess, onCancel }) {
     setReturnItems((prev) =>
       prev.map((it, i) => {
         if (i !== idx) return it;
+        // لا يمكن اختيار بند لا يوجد منه متبقٍ
+        if (it.remainingQuantity <= 0) return it;
+
         const newSelected = !it.selected;
+        const maxQty = it.remainingQuantity;
         return {
           ...it,
           selected: newSelected,
-          quantity: newSelected ? it.originalQuantity : 0,
-          total: newSelected ? Math.round(it.originalQuantity * it.unitPrice * 100) / 100 : 0,
+          quantity: newSelected ? maxQty : 0,
+          total: newSelected
+            ? Math.round(maxQty * it.unitPrice * 100) / 100
+            : 0,
         };
       })
     );
@@ -256,7 +281,10 @@ function CustomerReturnForm({ onSuccess, onCancel }) {
     setReturnItems((prev) =>
       prev.map((it, i) => {
         if (i !== idx) return it;
-        const qty = Math.max(0, Math.min(parseFloat(value) || 0, it.originalQuantity));
+        const qty = Math.max(
+          0,
+          Math.min(parseFloat(value) || 0, it.remainingQuantity)
+        );
         return {
           ...it,
           quantity: qty,
@@ -284,12 +312,15 @@ function CustomerReturnForm({ onSuccess, onCancel }) {
 
     if (!selectedCustomerId) errors.push('الصيدلية مطلوبة');
     if (!selectedInvoiceId) errors.push('الفاتورة الأصلية مطلوبة');
-    if (selectedItems.length === 0) errors.push('يجب اختيار بند واحد على الأقل بكمية > 0');
+    if (selectedItems.length === 0)
+      errors.push('يجب اختيار بند واحد على الأقل بكمية > 0');
     if (!settlementType) errors.push('طريقة التسوية مطلوبة');
 
     for (const it of selectedItems) {
-      if (it.quantity > it.originalQuantity) {
-        errors.push(`الكمية المُرجعة للبند "${it.itemName}" تتجاوز الكمية الأصلية`);
+      if (it.quantity > it.remainingQuantity) {
+        errors.push(
+          `الكمية المُرجعة للبند "${it.itemName}" تتجاوز المتاح للإرجاع (${it.remainingQuantity})`
+        );
         break;
       }
       if (!it.reason) {
@@ -307,7 +338,6 @@ function CustomerReturnForm({ onSuccess, onCancel }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
     if (!validate()) return;
 
     setIsSubmitting(true);
@@ -354,6 +384,11 @@ function CustomerReturnForm({ onSuccess, onCancel }) {
     );
   }
 
+  // ✅ عدد البنود التي بها متبقٍ (يُستخدم في التنبيه)
+  const availableItemsCount = returnItems.filter(
+    (it) => it.remainingQuantity > 0
+  ).length;
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {/* ═══ 1. البيانات الأساسية ═══ */}
@@ -364,7 +399,10 @@ function CustomerReturnForm({ onSuccess, onCancel }) {
             required
             value={selectedCustomerId}
             onChange={(e) => setSelectedCustomerId(e.target.value)}
-            options={customers.map((c) => ({ value: c.id, label: `${c.name} (${c.phone})` }))}
+            options={customers.map((c) => ({
+              value: c.id,
+              label: `${c.name} (${c.phone})`,
+            }))}
           />
 
           <Select
@@ -419,9 +457,7 @@ function CustomerReturnForm({ onSuccess, onCancel }) {
                   gracePeriodInfo.isWithin ? 'text-success-900' : 'text-danger-900'
                 }`}
               >
-                {gracePeriodInfo.isWithin
-                  ? 'داخل فترة السماح ✓'
-                  : 'خارج فترة السماح ⚠️'}
+                {gracePeriodInfo.isWithin ? 'داخل فترة السماح ✓' : 'خارج فترة السماح ⚠️'}
               </p>
               <div
                 className={`text-sm space-y-0.5 ${
@@ -436,7 +472,9 @@ function CustomerReturnForm({ onSuccess, onCancel }) {
                   <strong>{gracePeriodInfo.diffDays}</strong>)
                 </p>
                 {gracePeriodInfo.isWithin ? (
-                  <p>يتبقى <strong>{gracePeriodInfo.remainingDays}</strong> يوم قبل انتهاء المهلة.</p>
+                  <p>
+                    يتبقى <strong>{gracePeriodInfo.remainingDays}</strong> يوم قبل انتهاء المهلة.
+                  </p>
                 ) : (
                   <p>
                     انتهت المهلة بـ <strong>{Math.abs(gracePeriodInfo.remainingDays)}</strong> يوم
@@ -464,68 +502,99 @@ function CustomerReturnForm({ onSuccess, onCancel }) {
                     <th className="px-3 py-2 w-10" />
                     <th className="px-3 py-2 text-right font-bold">الصنف</th>
                     <th className="px-3 py-2 text-center font-bold w-24">الدفعة</th>
-                    <th className="px-3 py-2 text-center font-bold w-24">الكمية الأصلية</th>
-                    <th className="px-3 py-2 text-center font-bold w-28">الكمية المُرجعة</th>
+                    <th className="px-3 py-2 text-center font-bold w-20">المُباع</th>
+                    <th className="px-3 py-2 text-center font-bold w-20">مُرجع سابقاً</th>
+                    <th className="px-3 py-2 text-center font-bold w-24">المتاح للإرجاع</th>
+                    <th className="px-3 py-2 text-center font-bold w-24">الكمية المُرجعة</th>
                     <th className="px-3 py-2 text-center font-bold w-32">السبب</th>
                     <th className="px-3 py-2 text-left font-bold w-24">الإجمالي</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-100">
-                  {returnItems.map((it, idx) => (
-                    <tr
-                      key={`${it.invoiceItemIndex}-${it.batch}`}
-                      className={it.selected ? 'bg-primary-50/30' : ''}
-                    >
-                      <td className="px-3 py-2 text-center">
-                        <input
-                          type="checkbox"
-                          checked={it.selected}
-                          onChange={() => handleToggleItem(idx)}
-                          className="w-4 h-4 cursor-pointer"
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <p className="font-medium text-neutral-900">{it.itemName}</p>
-                      </td>
-                      <td className="px-3 py-2 text-center font-mono text-xs">{it.batch}</td>
-                      <td className="px-3 py-2 text-center numeric font-medium">
-                        {it.originalQuantity}
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          value={it.quantity || ''}
-                          onChange={(e) => handleQuantityChange(idx, e.target.value)}
-                          disabled={!it.selected}
-                          min="0"
-                          max={it.originalQuantity}
-                          step="any"
-                          className="w-full px-2 py-1 text-center rounded border border-neutral-300 text-sm numeric focus:outline-none focus:ring-2 focus:ring-primary-200 disabled:bg-neutral-100"
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <select
-                          value={it.reason}
-                          onChange={(e) => handleReasonChange(idx, e.target.value)}
-                          disabled={!it.selected}
-                          className="w-full px-1.5 py-1 rounded border border-neutral-300 text-xs focus:outline-none focus:ring-2 focus:ring-primary-200 disabled:bg-neutral-100"
-                        >
-                          {Object.entries(RETURN_REASON_LABELS_AR).map(([key, label]) => (
-                            <option key={key} value={key}>
-                              {label}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-3 py-2 text-left numeric font-medium">
-                        {formatCurrency(it.total, false)}
-                      </td>
-                    </tr>
-                  ))}
+                  {returnItems.map((it, idx) => {
+                    const isFullyReturned = it.remainingQuantity <= 0;
+                    return (
+                      <tr
+                        key={`${it.invoiceItemIndex}-${it.batch}`}
+                        className={
+                          isFullyReturned
+                            ? 'bg-neutral-50 opacity-60'
+                            : it.selected
+                            ? 'bg-primary-50/30'
+                            : ''
+                        }
+                      >
+                        <td className="px-3 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={it.selected}
+                            onChange={() => handleToggleItem(idx)}
+                            disabled={isFullyReturned}
+                            className="w-4 h-4 cursor-pointer disabled:cursor-not-allowed"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <p className="font-medium text-neutral-900">{it.itemName}</p>
+                          {isFullyReturned && (
+                            <p className="text-xs text-success-700 font-bold mt-0.5">
+                              ✓ مُرجع بالكامل
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-center font-mono text-xs">{it.batch}</td>
+                        <td className="px-3 py-2 text-center numeric font-medium">
+                          {it.originalQuantity}
+                        </td>
+                        <td className="px-3 py-2 text-center numeric text-neutral-600">
+                          {it.returnedQuantity}
+                        </td>
+                        <td className="px-3 py-2 text-center numeric font-bold text-primary-700">
+                          {it.remainingQuantity}
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="number"
+                            value={it.quantity || ''}
+                            onChange={(e) => handleQuantityChange(idx, e.target.value)}
+                            disabled={!it.selected || isFullyReturned}
+                            min="0"
+                            max={it.remainingQuantity}
+                            step="any"
+                            className="w-full px-2 py-1 text-center rounded border border-neutral-300 text-sm numeric focus:outline-none focus:ring-2 focus:ring-primary-200 disabled:bg-neutral-100"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <select
+                            value={it.reason}
+                            onChange={(e) => handleReasonChange(idx, e.target.value)}
+                            disabled={!it.selected || isFullyReturned}
+                            className="w-full px-1.5 py-1 rounded border border-neutral-300 text-xs focus:outline-none focus:ring-2 focus:ring-primary-200 disabled:bg-neutral-100"
+                          >
+                            {Object.entries(RETURN_REASON_LABELS_AR).map(([key, label]) => (
+                              <option key={key} value={key}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-3 py-2 text-left numeric font-medium">
+                          {formatCurrency(it.total, false)}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           </div>
+
+          {/* ═══ تنبيه: كل البنود مُرجعة ═══ */}
+          {availableItemsCount === 0 && (
+            <div className="mt-3 bg-warning-50 border border-warning-200 rounded p-3 text-sm text-warning-800">
+              <AlertCircle size={16} className="inline mr-1" />
+              كل بنود هذه الفاتورة تم إرجاعها بالكامل — لا يوجد متبقٍ لإنشاء مرتجع جديد.
+            </div>
+          )}
         </Section>
       )}
 
@@ -611,10 +680,21 @@ function CustomerReturnForm({ onSuccess, onCancel }) {
             </strong>
           </div>
           <div className="flex gap-2">
-            <Button type="button" variant="ghost" onClick={onCancel} disabled={isSubmitting}>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={onCancel}
+              disabled={isSubmitting}
+            >
               إلغاء
             </Button>
-            <Button type="submit" variant="primary" loading={isSubmitting} icon={Undo2}>
+            <Button
+              type="submit"
+              variant="primary"
+              loading={isSubmitting}
+              icon={Undo2}
+              disabled={selectedItems.length === 0}
+            >
               حفظ المرتجع
             </Button>
           </div>

@@ -9,18 +9,30 @@
  * - نستخدم req.validatedQuery للقوائم.
  * - نُصلح populate('salesRep', 'fullName') → 'name'.
  * - نُصلح getMyInvoices → req.user.linkedEntity?.id.
+ *
+ * ✅ 🅳 C (2026-11-10):
+ * - getInvoice: إضافة returnedQuantity + remainingQuantity لكل items[]
+ *   (لـ CustomerReturnForm: منع تجاوز الكمية المُرجعة).
+ *
+ * ✅ 🅵 (2026-11-10) — إصلاح fetchStats (Dashboard KPIs):
+ * - listInvoices: إضافة قراءة `unpaid` + `overdue` + `isDraft` + `hasReturns`
+ *   من req.validatedQuery — لتُعيد كل KPI رقماً صحيحاً (بدل 10 لكل واحدة).
+ * - السبب: fetchStats في InvoicesContext يستدعي 4 استدعاءات بـ unpaid/overdue/isDraft
+ *   لكن controller لم يكن يقرأها → كلها تُرجع نفس النتيجة (10).
  */
 
 import Invoice from '../models/Invoice.js';
+import CustomerReturn, { RETURN_STATUSES } from '../models/CustomerReturn.js';
 import invoiceService from '../services/invoiceService.js';
 import { AppError } from '../middlewares/errorMiddleware.js';
 
 /**
  * GET /api/invoices — قائمة الفواتير (مع Scope).
+ *
+ * ✅ 🅵: يدعم الآن unpaid / overdue / isDraft / hasReturns.
  */
 export const listInvoices = async (req, res, next) => {
   try {
-    // ⚠️ Phase A.5: req.validatedQuery (number) بدل req.query (string)
     const q = req.validatedQuery || req.query;
     const {
       page = 1,
@@ -31,6 +43,10 @@ export const listInvoices = async (req, res, next) => {
       from,
       to,
       search,
+      unpaid,
+      overdue,
+      isDraft,
+      hasReturns,
     } = q;
 
     const filter = {};
@@ -44,6 +60,38 @@ export const listInvoices = async (req, res, next) => {
     }
     if (search) {
       filter.invoiceNumber = { $regex: search, $options: 'i' };
+    }
+
+    // ✅ 🅵: unpaid — فواتير لم تُدفع بالكامل (ليست مسودة/ملغاة/مدفوعة)
+    if (unpaid === true) {
+      filter.remainingAmount = { $gt: 0 };
+      filter.status = { $nin: ['draft', 'cancelled', 'paid'] };
+    }
+
+    // ✅ 🅵: overdue — فواتير متأخرة (dueDate < now + remaining > 0)
+    if (overdue === true) {
+      filter.dueDate = { $lt: new Date() };
+      filter.remainingAmount = { $gt: 0 };
+      filter.status = { $nin: ['draft', 'cancelled', 'paid'] };
+    }
+
+    // ✅ 🅵: isDraft — فواتير مبدئية فقط
+    if (isDraft === true) {
+      filter.status = 'draft';
+    }
+
+    // ✅ 🅵: hasReturns — فواتير لها مرتجعات معتمدة
+    // ⚠️ هذا يتطلب استعلاماً منفصلاً — نتركه لـ Phase لاحقة إذا لزم
+    if (hasReturns === true) {
+      // نجلب IDs الفواتير التي لها مرتجعات معتمدة
+      const returnsWithInvoices = await CustomerReturn.find(
+        { status: RETURN_STATUSES.CONFIRMED },
+        { originalInvoice: 1 }
+      ).lean();
+      const invoiceIds = returnsWithInvoices
+        .map((r) => r.originalInvoice)
+        .filter(Boolean);
+      filter._id = { $in: invoiceIds };
     }
 
     // Scope: sales_rep يرى فواتيره فقط
@@ -62,7 +110,7 @@ export const listInvoices = async (req, res, next) => {
     const [invoices, total] = await Promise.all([
       Invoice.find(filter)
         .populate('pharmacy', 'name phone code')
-        .populate('salesRep', 'name email')   // ⚠️ 'name' بدل 'fullName'
+        .populate('salesRep', 'name email')
         .sort({ invoiceDate: -1, createdAt: -1 })
         .skip(skip)
         .limit(limitNum)
@@ -94,7 +142,6 @@ export const getMyInvoices = async (req, res, next) => {
     if (req.user.role === 'sales_rep') {
       filter.salesRep = req.user._id;
     } else if (req.user.role === 'pharmacy') {
-      // ⚠️ Phase A.5: req.user.linkedEntity?.id بدل req.user.customerId
       const customerId = req.user.linkedEntity?.id;
       if (!customerId) {
         throw new AppError(
@@ -126,14 +173,18 @@ export const getMyInvoices = async (req, res, next) => {
 
 /**
  * GET /api/invoices/:id
+ *
+ * ✅ 🅳 C: إضافة returnedQuantity + remainingQuantity لكل items[]
+ * (لـ CustomerReturnForm: منع تجاوز الكمية المُرجعة).
  */
 export const getInvoice = async (req, res, next) => {
   try {
     const invoice = await Invoice.findById(req.params.id)
       .populate('pharmacy', 'name phone code address')
-      .populate('salesRep', 'name email')       // ⚠️ 'name'
+      .populate('salesRep', 'name email')
       .populate('warehouse', 'name code')
-      .populate('finalizedBy', 'name');         // ⚠️ 'name'
+      .populate('finalizedBy', 'name')
+      .populate('items.item', 'tradeName scientificName units');
 
     if (!invoice) {
       throw new AppError('الفاتورة غير موجودة', 404, 'INVOICE_NOT_FOUND');
@@ -153,7 +204,50 @@ export const getInvoice = async (req, res, next) => {
       throw new AppError('غير مصرح', 403, 'FORBIDDEN');
     }
 
-    res.status(200).json({ success: true, data: invoice });
+    // ✅ 🅳 C: حساب returnedQuantity + remainingQuantity لكل بند
+    // (مجموع المرتجعات المعتمدة فقط — pending لا يُحسب)
+    const returnedAgg = await CustomerReturn.aggregate([
+      {
+        $match: {
+          originalInvoice: invoice._id,
+          status: RETURN_STATUSES.CONFIRMED,
+        },
+      },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: {
+            item: '$items.item',
+            batch: '$items.batch',
+          },
+          quantity: { $sum: '$items.quantity' },
+        },
+      },
+    ]);
+
+    const returnedMap = new Map();
+    for (const r of returnedAgg) {
+      const key = `${String(r._id.item)}:${String(r._id.batch).toUpperCase()}`;
+      returnedMap.set(key, Math.round((Number(r.quantity) + Number.EPSILON) * 100) / 100);
+    }
+
+    // نسخة plain object من الفاتورة
+    const invoiceObj = invoice.toObject();
+
+    invoiceObj.items = (invoiceObj.items || []).map((it) => {
+      const key = `${String(it.item?._id || it.item)}:${String(it.batch).toUpperCase()}`;
+      const returned = returnedMap.get(key) || 0;
+      const original = Number(it.quantity) || 0;
+      const remaining = Math.max(0, Math.round((original - returned + Number.EPSILON) * 100) / 100);
+
+      return {
+        ...it,
+        returnedQuantity: returned,
+        remainingQuantity: remaining,
+      };
+    });
+
+    res.status(200).json({ success: true, data: invoiceObj });
   } catch (error) {
     next(error);
   }
@@ -162,8 +256,6 @@ export const getInvoice = async (req, res, next) => {
 /**
  * POST /api/invoices
  * إنشاء فاتورة مباشرة.
- *
- * ⚠️ Phase A.5: نمرّر req كاملاً (لـ priceValidationService + logAuditEvent).
  */
 export const createInvoice = async (req, res, next) => {
   try {
@@ -174,7 +266,7 @@ export const createInvoice = async (req, res, next) => {
         bankAccountId: req.body.bankAccountId || null,
       },
       user: req.user,
-      req,                                        // ⚠️ req كامل
+      req,
     });
 
     res.status(201).json({
@@ -189,14 +281,13 @@ export const createInvoice = async (req, res, next) => {
 
 /**
  * POST /api/invoices/draft
- * إنشاء مسودة.
  */
 export const createDraft = async (req, res, next) => {
   try {
     const draft = await invoiceService.createDraft({
       body: req.body,
       user: req.user,
-      req,                                        // ⚠️ req كامل
+      req,
     });
 
     res.status(201).json({
@@ -211,7 +302,6 @@ export const createDraft = async (req, res, next) => {
 
 /**
  * PATCH /api/invoices/:id/draft
- * تعديل مسودة.
  */
 export const updateDraft = async (req, res, next) => {
   try {
@@ -219,7 +309,7 @@ export const updateDraft = async (req, res, next) => {
       invoiceId: req.params.id,
       body: req.body,
       user: req.user,
-      req,                                        // ⚠️ req كامل
+      req,
     });
 
     res.status(200).json({
@@ -234,9 +324,6 @@ export const updateDraft = async (req, res, next) => {
 
 /**
  * POST /api/invoices/:id/finalize
- * اعتماد مسودة.
- *
- * ⚠️ Phase A.5: نمرّر req كاملاً.
  */
 export const finalizeInvoice = async (req, res, next) => {
   try {
@@ -248,7 +335,7 @@ export const finalizeInvoice = async (req, res, next) => {
         bankAccountId: req.body.bankAccountId || null,
       },
       user: req.user,
-      req,                                        // ⚠️ req كامل
+      req,
     });
 
     res.status(200).json({
@@ -263,7 +350,6 @@ export const finalizeInvoice = async (req, res, next) => {
 
 /**
  * PATCH /api/invoices/:id
- * تحديث فاتورة قائمة (نادر — فقط notes/ملاحظات).
  */
 export const updateInvoice = async (req, res, next) => {
   try {
@@ -283,7 +369,6 @@ export const updateInvoice = async (req, res, next) => {
 
 /**
  * POST /api/invoices/:id/payments
- * تسجيل دفعة على فاتورة.
  */
 export const registerPayment = async (req, res, next) => {
   try {
@@ -300,7 +385,7 @@ export const registerPayment = async (req, res, next) => {
       cashFundId: cashFundId || null,
       bankAccountId: bankAccountId || null,
       user: req.user,
-      req,                                        // ⚠️ req كامل
+      req,
     });
 
     res.status(200).json({
@@ -315,7 +400,6 @@ export const registerPayment = async (req, res, next) => {
 
 /**
  * PATCH /api/invoices/:id/cancel
- * إلغاء فاتورة.
  */
 export const cancelInvoice = async (req, res, next) => {
   try {
@@ -326,7 +410,7 @@ export const cancelInvoice = async (req, res, next) => {
       invoiceId: req.params.id,
       reason: finalReason,
       user: req.user,
-      req,                                        // ⚠️ req كامل
+      req,
     });
 
     res.status(200).json({

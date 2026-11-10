@@ -2,10 +2,9 @@
  * @file InvoiceDetailPage.jsx
  * @description صفحة تفاصيل الفاتورة — Phase 2.5.
  *
- * إضافة:
- *   - زر "تعديل المسودة" (يفتح InvoiceForm في وضع editDraft).
- *   - زر "اعتماد ودفع" (يفتح FinalizeModal).
- *   - auto-open لـ FinalizeModal عند الوصول بـ ?finalize=1.
+ * ✅ 🅳 (2026-11-09):
+ * - سجل الدفعات: جلب CashTransaction (referenceType='invoice', referenceId=invoiceId)
+ *   وعرضها كقائمة (بدل الدفعة الواحدة).
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -19,6 +18,7 @@ import { useAuth } from '../hooks/useAuth.js';
 import { useInvoices } from '../hooks/useInvoices.js';
 import { useToast } from '../hooks/useToast.js';
 import * as invoicesAPI from '../api/invoicesAPI.js';
+import * as cashTransactionsAPI from '../api/cashTransactionsAPI.js';
 
 import Button from '../components/UI/Button.jsx';
 import Card from '../components/UI/Card.jsx';
@@ -73,6 +73,10 @@ function InvoiceDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // ✅ 🅳: حالة سجل الدفعات
+  const [payments, setPayments] = useState([]);
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
+
   // Modals
   const [isPrintOpen, setIsPrintOpen] = useState(false);
   const [isPayOpen, setIsPayOpen] = useState(false);
@@ -115,6 +119,37 @@ function InvoiceDetailPage() {
 
   useEffect(() => { loadInvoice(); }, [loadInvoice]);
 
+  // ✅ 🅳: جلب الدفعات (CashTransaction) عند تحميل الفاتورة
+  const loadPayments = useCallback(async () => {
+    if (!invoice || invoice.status === 'draft' || invoice.status === 'cancelled') {
+      setPayments([]);
+      return;
+    }
+    setPaymentsLoading(true);
+    try {
+      const result = await cashTransactionsAPI.getCashTransactions({
+        referenceType: 'invoice',
+        referenceId: invoice._id || id,
+        limit: 100,
+      });
+      // ✅ getCashTransactions يُرجع { success, data, pagination } — نأخذ data
+      const list = Array.isArray(result?.data)
+        ? result.data
+        : Array.isArray(result)
+          ? result
+          : [];
+      setPayments(list);
+    } catch {
+      setPayments([]);
+    } finally {
+      setPaymentsLoading(false);
+    }
+  }, [invoice, id]);
+
+  useEffect(() => {
+    if (invoice) loadPayments();
+  }, [invoice, loadPayments]);
+
   // ═══════════════════════════════════════════════
   // Actions
   // ═══════════════════════════════════════════════
@@ -132,6 +167,7 @@ function InvoiceDetailPage() {
       setIsPayOpen(false);
       setPaymentAmount(''); setPaymentNotes('');
       loadInvoice();
+      loadPayments();
     } else { toast.error(r.error); }
   };
 
@@ -170,6 +206,7 @@ function InvoiceDetailPage() {
       toast.success('تم اعتماد الفاتورة وتفعيل كل التأثيرات.');
       setIsFinalizeOpen(false);
       loadInvoice();
+      loadPayments();
     } else { toast.error(r.error); }
   };
 
@@ -322,21 +359,61 @@ function InvoiceDetailPage() {
 
       {/* Financial summary */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* ✅ 🅳: سجل الدفعات — قائمة كاملة */}
         <Card title="سجل الدفعات">
           {invoice.status === 'cancelled' ? (
             <div className="text-center py-6 text-neutral-500 text-sm">الفاتورة ملغاة.</div>
           ) : isDraft ? (
             <div className="text-center py-6 text-neutral-500 text-sm">لم تُعتمد بعد.</div>
-          ) : invoice.paidAmount > 0 ? (
-            <div className="space-y-3">
-              <InfoRow icon={Banknote} label="المبلغ المدفوع" value={formatCurrency(invoice.paidAmount)} />
-              {invoice.paidAt && (
-                <InfoRow icon={Calendar} label="تاريخ آخر دفعة" value={formatDate(invoice.paidAt)} />
-              )}
-              <InfoRow label="طريقة الدفع" value={invoice.paymentMethod || '—'} />
-            </div>
-          ) : (
+          ) : paymentsLoading ? (
+            <Loading size="sm" text="جاري تحميل الدفعات..." />
+          ) : payments.length === 0 ? (
             <div className="text-center py-6 text-neutral-500 text-sm">لا توجد دفعات بعد.</div>
+          ) : (
+            <div className="space-y-3 max-h-80 overflow-y-auto">
+              {payments.map((p, idx) => (
+                <div
+                  key={p._id || idx}
+                  className={`p-3 rounded-md border ${p.isReversed
+                      ? 'bg-neutral-50 border-neutral-200 opacity-60'
+                      : 'bg-success-50 border-success-200'
+                    }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-neutral-700">
+                      دفعة #{idx + 1}
+                    </span>
+                    <span className={`text-xs font-bold ${p.isReversed ? 'text-neutral-500' : 'text-success-700'}`}>
+                      {p.isReversed ? 'مُعكسة' : 'نشطة'}
+                    </span>
+                  </div>
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-neutral-600">المبلغ</span>
+                      <span className="font-bold numeric">{formatCurrency(p.amount)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-neutral-600">التاريخ</span>
+                      <span className="text-neutral-900">{formatDate(p.transactionDate)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-neutral-600">الطريقة</span>
+                      <span className="text-neutral-900">
+                        {p.method === 'cash' ? 'نقدي' : 'بنكي'}
+                      </span>
+                    </div>
+                    {p.description && (
+                      <div className="flex justify-between">
+                        <span className="text-neutral-600">الوصف</span>
+                        <span className="text-neutral-700 text-xs text-left max-w-[200px] truncate" title={p.description}>
+                          {p.description}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </Card>
 
@@ -385,12 +462,14 @@ function InvoiceDetailPage() {
         <InvoicePrint
           invoice={invoice}
           company={{
-            name: 'شركة توب فارما الطبية',
+            name: 'شركة توب فارمة التجارية لتوزيع الأدوية',
             subtitle: 'أدوية - مستلزمات طبية - كوزمتك',
-            phone: '+249 123 456 789', email: 'info@toppharma.sd',
+            phone: '+249 123 456 789',
+            email: 'info@toppharma.sd',
             address: 'الخرطوم - السودان',
-            bankName: 'بنك الخرطوم', bankAccount: '1234567890',
-            bankAccountName: 'شركة توب فارما الطبية',
+            bankName: 'بنك الخرطوم',
+            bankAccount: '1234567890',
+            bankAccountName: 'شركة توب فارمة التجارية لتوزيع الأدوية',
             logoUrl: '/logo.png',
           }}
           onClose={() => setIsPrintOpen(false)}

@@ -1,16 +1,19 @@
 /**
  * @file Dashboard.jsx
- * @description
- * لوحة التحكم الرئيسية.
+ * @description لوحة التحكم — نسخة احترافية.
  *
- * ✅ 🅱 (2026-11-08):
- * - حذف `useDeliveryNotes` + StatCard "إيصالات معلقة" + QuickLink "إيصالات التسليم".
+ * ✅ (2026-11-10):
+ * - 6 KPIs: إجمالي + غير مدفوعة + متأخرة + مبدئية + دفعات قاربة + تحت الحد.
+ * - أحدث 5 فواتير — مع fetchInvoices في useEffect (لضمان التحميل الفوري).
+ * - إعادة ترتيب: KPIs → أحدث → تنبيهات → تقارير → وصول سريع → مشتريات.
+ * - اسم الشركة: "شركة توب فارمة التجارية لتوزيع الأدوية".
+ * - ⚠️ لا زر تحديث — بناءً على طلب المستخدم.
  */
 
+import { useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   FileText,
-  // ⚠️ 🅱: حُذف Truck
   Undo2,
   Receipt,
   ArrowLeftRight,
@@ -22,17 +25,20 @@ import {
   BarChart3,
   Wallet,
   Plus,
+  Clock,
+  FileEdit,
 } from 'lucide-react';
 
 import { useAuth } from '../hooks/useAuth.js';
 import { useInvoices } from '../hooks/useInvoices.js';
-// ⚠️ 🅱: حُذف useDeliveryNotes
 import { useCustomerReturns } from '../hooks/useCustomerReturns.js';
 import { useStock } from '../hooks/useStock.js';
 
 import Card from '../components/UI/Card.jsx';
 import Button from '../components/UI/Button.jsx';
-import { formatNumber } from '../utils/formatters.js';
+import { formatNumber, formatCurrency, formatDate } from '../utils/formatters.js';
+
+const COMPANY_NAME = 'شركة توب فارمة التجارية لتوزيع الأدوية';
 
 // ═══════════════════════════════════════════════
 // 1. مكونات فرعية
@@ -45,27 +51,23 @@ function StatCard({ icon: Icon, label, value, color = 'primary', suffix = '', to
     danger: 'bg-danger-50 text-danger-700',
     success: 'bg-success-50 text-success-700',
     info: 'bg-info-50 text-info-700',
+    neutral: 'bg-neutral-100 text-neutral-700',
   };
 
   const content = (
     <div className="bg-white rounded-lg border border-neutral-200 p-4 hover:shadow-md transition-shadow">
-      <div className="flex items-start justify-between gap-2 mb-2">
-        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${colorMap[color]}`}>
-          <Icon size={20} />
-        </div>
+      <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-2 ${colorMap[color]}`}>
+        <Icon size={20} />
       </div>
       <p className="text-xs text-neutral-500 mb-1">{label}</p>
       <p className="text-2xl font-bold text-neutral-900 numeric">
-        {formatNumber(value)}
+        {typeof value === 'number' ? formatNumber(value) : value}
         {suffix && <span className="text-sm font-normal text-neutral-500 mr-1">{suffix}</span>}
       </p>
     </div>
   );
 
-  if (to) {
-    return <Link to={to}>{content}</Link>;
-  }
-  return content;
+  return to ? <Link to={to}>{content}</Link> : content;
 }
 
 function QuickLink({ to, icon: Icon, title, description, color = 'primary' }) {
@@ -93,6 +95,23 @@ function QuickLink({ to, icon: Icon, title, description, color = 'primary' }) {
   );
 }
 
+function InvoiceStatusBadge({ status }) {
+  const map = {
+    draft: { label: 'مبدئية', class: 'bg-neutral-200 text-neutral-700' },
+    pending: { label: 'معلقة', class: 'bg-warning-100 text-warning-800' },
+    paid: { label: 'مدفوعة', class: 'bg-success-100 text-success-800' },
+    partial: { label: 'جزئية', class: 'bg-info-100 text-info-800' },
+    overdue: { label: 'متأخرة', class: 'bg-danger-100 text-danger-800' },
+    cancelled: { label: 'ملغاة', class: 'bg-neutral-200 text-neutral-700' },
+  };
+  const c = map[status] || map.pending;
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${c.class}`}>
+      {c.label}
+    </span>
+  );
+}
+
 // ═══════════════════════════════════════════════
 // 2. المكون الرئيسي
 // ═══════════════════════════════════════════════
@@ -101,10 +120,20 @@ function Dashboard() {
   const { user, userName, isAdmin, isAccountant, isSalesRep, isStorekeeper } = useAuth();
   const navigate = useNavigate();
 
-  const { stats: invoiceStats } = useInvoices();
-  // ⚠️ 🅱: حُذف deliveryStats
+  const {
+    stats: invoiceStats,
+    invoices,
+    fetchStats: fetchInvoiceStats,
+    fetchInvoices,
+  } = useInvoices();
   const { stats: returnStats } = useCustomerReturns();
   const { expiringSoon, belowReorder } = useStock();
+
+  // ✅ تحميل أولي — stats + أحدث 5 فواتير
+  useEffect(() => {
+    fetchInvoiceStats?.();
+    fetchInvoices?.({ limit: 5, sortBy: 'invoiceDate', sortOrder: 'desc' });
+  }, [fetchInvoiceStats, fetchInvoices]);
 
   const canSeeFinance = isAdmin || isAccountant;
   const canSeeSales = isAdmin || isAccountant || isSalesRep;
@@ -113,6 +142,9 @@ function Dashboard() {
   const handleGoToCreateInvoice = () => {
     navigate('/sales/invoices', { state: { openCreateForm: true } });
   };
+
+  // ✅ أحدث 5 فواتير — من invoices (محمّلة عبر fetchInvoices)
+  const recentInvoices = (invoices || []).slice(0, 5);
 
   return (
     <div className="space-y-6">
@@ -138,10 +170,10 @@ function Dashboard() {
         )}
       </div>
 
-      {/* ═══ KPIs الرئيسية ═══ */}
+      {/* ═══ 6 KPIs ═══ */}
       <div>
         <h2 className="text-lg font-bold text-neutral-900 mb-3">المؤشرات الرئيسية</h2>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           <StatCard
             icon={FileText}
             label="إجمالي الفواتير"
@@ -150,22 +182,81 @@ function Dashboard() {
             to={canSeeSales ? '/sales/invoices' : undefined}
           />
           <StatCard
+            icon={Clock}
+            label="غير مدفوعة"
+            value={invoiceStats?.unpaid || 0}
+            color="warning"
+            to={canSeeSales ? '/sales/invoices?unpaid=true' : undefined}
+          />
+          <StatCard
             icon={AlertCircle}
-            label="فواتير متأخرة"
+            label="متأخرة"
             value={invoiceStats?.overdue || 0}
             color="danger"
             to={canSeeSales ? '/sales/invoices?overdue=true' : undefined}
           />
           <StatCard
-            icon={Undo2}
-            label="مرتجعات معلقة"
-            value={returnStats?.pending || 0}
-            color="warning"
-            to={canSeeSales ? '/sales/customer-returns' : undefined}
+            icon={FileEdit}
+            label="فواتير مبدئية"
+            value={invoiceStats?.drafts || 0}
+            color="neutral"
+            to={canSeeSales ? '/sales/invoices?isDraft=true' : undefined}
           />
-          {/* ⚠️ 🅱: حُذف StatCard "إيصالات معلقة" */}
+          <StatCard
+            icon={AlertCircle}
+            label="دفعات قاربة الانتهاء"
+            value={expiringSoon?.count || 0}
+            color="warning"
+            to="/inventory/stock?filter=expiring"
+          />
+          <StatCard
+            icon={TrendingUp}
+            label="أصناف تحت الحد"
+            value={belowReorder?.count || 0}
+            color="danger"
+            to="/inventory/items?filter=lowStock"
+          />
         </div>
       </div>
+
+      {/* ═══ أحدث 5 فواتير ═══ */}
+      {canSeeSales && recentInvoices.length > 0 && (
+        <Card title="أحدث الفواتير" icon={FileText}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-neutral-50 border-b border-neutral-200">
+                <tr>
+                  <th className="px-3 py-2 text-right font-bold text-xs">رقم الفاتورة</th>
+                  <th className="px-3 py-2 text-right font-bold text-xs">الصيدلية</th>
+                  <th className="px-3 py-2 text-center font-bold text-xs">التاريخ</th>
+                  <th className="px-3 py-2 text-left font-bold text-xs">الإجمالي</th>
+                  <th className="px-3 py-2 text-center font-bold text-xs">الحالة</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-100">
+                {recentInvoices.map((inv) => (
+                  <tr key={inv.id || inv._id} className="hover:bg-neutral-50">
+                    <td className="px-3 py-2 font-mono text-xs text-primary-800 font-bold">
+                      <Link to={`/sales/invoices/${inv.id || inv._id}`} className="hover:underline">
+                        {inv.invoiceNumber}
+                      </Link>
+                    </td>
+                    <td className="px-3 py-2 text-sm">{inv.pharmacy?.name || '—'}</td>
+                    <td className="px-3 py-2 text-center text-xs">{formatDate(inv.invoiceDate)}</td>
+                    <td className="px-3 py-2 text-left numeric font-medium">{formatCurrency(inv.total, false)}</td>
+                    <td className="px-3 py-2 text-center"><InvoiceStatusBadge status={inv.status} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-3 text-center">
+            <Link to="/sales/invoices" className="text-sm text-primary-700 hover:text-primary-900 font-medium">
+              عرض كل الفواتير ←
+            </Link>
+          </div>
+        </Card>
+      )}
 
       {/* ═══ التنبيهات ═══ */}
       {(expiringSoon?.count > 0 || belowReorder?.count > 0) && (
@@ -208,7 +299,7 @@ function Dashboard() {
         </div>
       )}
 
-      {/* ═══ التقارير (Phase 4) ═══ */}
+      {/* ═══ التقارير ═══ */}
       {canSeeReports && (
         <div>
           <h2 className="text-lg font-bold text-neutral-900 mb-3">التقارير والتحليلات</h2>
@@ -258,7 +349,6 @@ function Dashboard() {
                 description="إنشاء ومتابعة الفواتير"
                 color="primary"
               />
-              {/* ⚠️ 🅱: حُذف QuickLink "إيصالات التسليم" */}
               <QuickLink
                 to="/sales/customer-returns"
                 icon={Undo2}
@@ -322,7 +412,7 @@ function Dashboard() {
       {/* ═══ الفوتر ═══ */}
       <div className="text-center text-xs text-neutral-500 pt-4">
         <p>
-          مرحباً بك في نظام Pharma System — شركة TOP PHARMA MEDICAL COMPANY
+          مرحباً بك في نظام Pharma System — {COMPANY_NAME}
         </p>
         <p className="mt-1">
           المرحلة الحالية: <strong>Phase 4 — التقارير</strong> — دورك: <strong>{user?.role || '—'}</strong>

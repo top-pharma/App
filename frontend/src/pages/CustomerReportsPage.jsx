@@ -5,6 +5,10 @@
  *
  *   1. أعمار الديون (aging)
  *   2. كشف حساب عميل (statement) — يتطلب اختيار عميل
+ *
+ * ⚠️ إصلاح 2026-11-11:
+ *  - F1: إضافة buildExportParams (كانت مفقودة — ReferenceError).
+ *  - F2: نقل ExportButtons إلى المكان الصحيح (داخل return).
  */
 
 import { useEffect, useState } from 'react';
@@ -63,7 +67,7 @@ export default function CustomerReportsPage() {
   useEffect(() => {
     (async () => {
       try {
-        const result = await listCustomers({ limit: 500 });
+        const result = await listCustomers({ limit: 100 });
         setCustomers(result?.items || result?.data?.items || []);
       } catch (err) {
         // eslint-disable-next-line no-console
@@ -115,24 +119,12 @@ export default function CustomerReportsPage() {
     setError(null);
   };
 
-  {/* قبل: كانت تعرض ExportButtons فقط لـ aging */}
-{/* بعد: تعرضها لكليهما معاً */}
-{activeTab === 'aging' && (
-  <ExportButtons
-    reportName="aging"
-    category="customers"
-    params={buildExportParams()}
-    onError={(msg) => setError(msg)}
-  />
-)}
-{activeTab === 'statement' && customerId && (
-  <ExportButtons
-    reportName="statement"
-    category="customers"
-    params={buildExportParams()}
-    onError={(msg) => setError(msg)}
-  />
-)}
+  // ✅ F1: buildExportParams (كانت مفقودة)
+  const buildExportParams = () => {
+    if (activeTab === 'aging') return { asOf: to };
+    if (activeTab === 'statement') return { from, to };
+    return {};
+  };
 
   const renderReport = () => {
     if (loading) {
@@ -315,9 +307,18 @@ export default function CustomerReportsPage() {
             {activeTab === 'aging' ? `كما في ${to}` : `${from} — ${to}`}
           </p>
         </div>
+        {/* ✅ F2: ExportButtons في المكان الصحيح */}
         {activeTab === 'aging' && (
           <ExportButtons
             reportName="aging"
+            category="customers"
+            params={buildExportParams()}
+            onError={(msg) => setError(msg)}
+          />
+        )}
+        {activeTab === 'statement' && customerId && (
+          <ExportButtons
+            reportName="statement"
             category="customers"
             params={buildExportParams()}
             onError={(msg) => setError(msg)}

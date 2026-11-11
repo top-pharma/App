@@ -6,10 +6,22 @@
  * - إنشاء / تعديل / حذف
  * - تعيين كافتراضي
  * - إيداع / سحب
+ *
+ * ⚠️ إصلاح 2026-11-11:
+ *  - F1: currentBalance بدل balance.
+ *  - F2: columns بصيغة Table (key/label/render).
+ *  - F3: movementFund.currentBalance.
  */
 
 import { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, Star, ArrowUpCircle, ArrowDownCircle } from 'lucide-react';
+import {
+  Plus,
+  Edit,
+  Trash2,
+  Star,
+  ArrowUpCircle,
+  ArrowDownCircle,
+} from 'lucide-react';
 import { useCashFundsContext } from '../context/CashFundsContext.jsx';
 import { useToast } from '../hooks/useToast.js';
 import Button from '../components/UI/Button.jsx';
@@ -20,8 +32,17 @@ import CashFundForm from '../components/Finance/CashFundForm.jsx';
 import { formatCurrency, formatDate } from '../utils/formatters.js';
 
 const CashFundsPage = () => {
-  const { funds, loading, fetchFunds, createFund, updateFund, deleteFund, setAsDefault, movement } = useCashFundsContext();
-  const { showToast } = useToast();
+  const {
+    funds,
+    loading,
+    fetchFunds,
+    createFund,
+    updateFund,
+    deleteFund,
+    setAsDefault,
+    movement,
+  } = useCashFundsContext();
+  const { success, error: showError } = useToast();
 
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingFund, setEditingFund] = useState(null);
@@ -34,7 +55,8 @@ const CashFundsPage = () => {
 
   useEffect(() => {
     fetchFunds();
-  }, [fetchFunds]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleCreate = () => {
     setEditingFund(null);
@@ -47,91 +69,114 @@ const CashFundsPage = () => {
   };
 
   const handleSubmit = async (payload) => {
-    if (editingFund) {
-      await updateFund(editingFund._id, payload);
-    } else {
-      await createFund(payload);
+    try {
+      if (editingFund) {
+        await updateFund(editingFund.id || editingFund._id, payload);
+      } else {
+        await createFund(payload);
+      }
+      setIsFormOpen(false);
+      setEditingFund(null);
+    } catch (err) {
+      // Toast من Context
     }
   };
 
   const handleDelete = async () => {
     if (!deletingFund) return;
     try {
-      await deleteFund(deletingFund._id);
+      await deleteFund(deletingFund.id || deletingFund._id);
       setDeletingFund(null);
     } catch (err) {
-      showToast(err.response?.data?.message || 'فشل الحذف', 'error');
+      showError(err?.error?.message || err?.message || 'فشل الحذف');
     }
   };
 
   const handleSetDefault = async (fund) => {
     try {
-      await setAsDefault(fund._id);
+      await setAsDefault(fund.id || fund._id);
     } catch (err) {
-      showToast(err.response?.data?.message || 'فشل التعيين', 'error');
+      showError(err?.error?.message || err?.message || 'فشل التعيين');
     }
   };
 
   const handleMovementSubmit = async () => {
     if (!movementAmount || Number(movementAmount) <= 0) {
-      showToast('أدخل مبلغاً صحيحاً', 'error');
+      showError('أدخل مبلغاً صحيحاً');
       return;
     }
     setSubmitting(true);
     try {
-      await movement(movementFund._id, {
+      await movement(movementFund.id || movementFund._id, {
         type: movementType,
         amount: Number(movementAmount),
-        description: movementDescription || (movementType === 'deposit' ? 'إيداع نقدي' : 'سحب نقدي'),
+        description:
+          movementDescription ||
+          (movementType === 'deposit' ? 'إيداع نقدي' : 'سحب نقدي'),
       });
       setMovementFund(null);
       setMovementAmount('');
       setMovementDescription('');
     } catch (err) {
-      showToast(err.response?.data?.message || 'فشل العملية', 'error');
+      showError(err?.error?.message || err?.message || 'فشل العملية');
     } finally {
       setSubmitting(false);
     }
   };
 
+  // ✅ F2: columns بصيغة Table (key/label/render)
   const columns = [
     {
-      header: 'الاسم',
-      accessor: 'name',
-      cell: (row) => (
+      key: 'name',
+      label: 'الاسم',
+      render: (row) => (
         <div className="flex items-center gap-2">
           <span className="font-medium">{row.name}</span>
           {row.isDefault && (
-            <span className="px-2 py-0.5 bg-yellow-100 text-yellow-800 text-xs rounded-full">افتراضي</span>
+            <span className="px-2 py-0.5 bg-yellow-100 text-yellow-800 text-xs rounded-full">
+              افتراضي
+            </span>
           )}
           {!row.isActive && (
-            <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">معطّل</span>
+            <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">
+              معطّل
+            </span>
           )}
         </div>
       ),
     },
-    { header: 'الكود', accessor: 'code' },
     {
-      header: 'الرصيد',
-      accessor: 'balance',
-      cell: (row) => (
-        <span className="font-bold text-green-700">{formatCurrency(row.balance)} SDG</span>
+      key: 'code',
+      label: 'الكود',
+      render: (row) => row.code || '—',
+    },
+    {
+      key: 'currentBalance',
+      label: 'الرصيد',
+      align: 'end',
+      render: (row) => (
+        <span className="font-bold text-green-700">
+          {formatCurrency(row.currentBalance || 0)} SDG
+        </span>
       ),
     },
     {
-      header: 'الرصيد الافتتاحي',
-      accessor: 'openingBalance',
-      cell: (row) => formatCurrency(row.openingBalance),
+      key: 'openingBalance',
+      label: 'الرصيد الافتتاحي',
+      align: 'end',
+      render: (row) => formatCurrency(row.openingBalance || 0),
     },
     {
-      header: 'تاريخ الإنشاء',
-      accessor: 'createdAt',
-      cell: (row) => formatDate(row.createdAt),
+      key: 'createdAt',
+      label: 'تاريخ الإنشاء',
+      render: (row) => formatDate(row.createdAt),
     },
     {
-      header: 'إجراءات',
-      cell: (row) => (
-        <div className="flex gap-1">
+      key: 'actions',
+      label: 'إجراءات',
+      align: 'center',
+      render: (row) => (
+        <div className="flex gap-1 justify-center">
           {!row.isDefault && row.isActive && (
             <button
               onClick={() => handleSetDefault(row)}
@@ -142,7 +187,10 @@ const CashFundsPage = () => {
             </button>
           )}
           <button
-            onClick={() => { setMovementFund(row); setMovementType('deposit'); }}
+            onClick={() => {
+              setMovementFund(row);
+              setMovementType('deposit');
+            }}
             className="p-1.5 text-green-600 hover:bg-green-50 rounded"
             title="إيداع"
             disabled={!row.isActive}
@@ -150,7 +198,10 @@ const CashFundsPage = () => {
             <ArrowUpCircle size={16} />
           </button>
           <button
-            onClick={() => { setMovementFund(row); setMovementType('withdrawal'); }}
+            onClick={() => {
+              setMovementFund(row);
+              setMovementType('withdrawal');
+            }}
             className="p-1.5 text-orange-600 hover:bg-orange-50 rounded"
             title="سحب"
             disabled={!row.isActive}
@@ -177,7 +228,13 @@ const CashFundsPage = () => {
     },
   ];
 
-  if (loading && funds.length === 0) return <Loading />;
+  if (loading && funds.length === 0) {
+    return (
+      <div className="p-6">
+        <Loading text="جاري تحميل الصناديق..." />
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">
@@ -191,20 +248,25 @@ const CashFundsPage = () => {
         </Button>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-        <Table columns={columns} data={funds} emptyMessage="لا توجد صناديق بعد" />
-      </div>
+      <Table
+        columns={columns}
+        data={funds}
+        loading={loading}
+        emptyMessage="لا توجد صناديق بعد — اضغط 'صندوق جديد' للبدء"
+        rowKey="id"
+      />
 
-      {/* نموذج الإنشاء/التعديل */}
       <CashFundForm
         isOpen={isFormOpen}
-        onClose={() => { setIsFormOpen(false); setEditingFund(null); }}
+        onClose={() => {
+          setIsFormOpen(false);
+          setEditingFund(null);
+        }}
         onSubmit={handleSubmit}
         initialData={editingFund}
         isEdit={!!editingFund}
       />
 
-      {/* تأكيد الحذف */}
       <ConfirmDialog
         isOpen={!!deletingFund}
         onClose={() => setDeletingFund(null)}
@@ -220,9 +282,12 @@ const CashFundsPage = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl p-6 w-full max-w-md">
             <h3 className="text-lg font-bold mb-4">
-              {movementType === 'deposit' ? 'إيداع نقدي' : 'سحب نقدي'} — {movementFund.name}
+              {movementType === 'deposit' ? 'إيداع نقدي' : 'سحب نقدي'} —{' '}
+              {movementFund.name}
             </h3>
-            <p className="text-sm text-gray-600 mb-4">الرصيد الحالي: {formatCurrency(movementFund.balance)} SDG</p>
+            <p className="text-sm text-gray-600 mb-4">
+              الرصيد الحالي: {formatCurrency(movementFund.currentBalance || 0)} SDG
+            </p>
             <div className="space-y-3">
               <div>
                 <label className="block text-sm font-medium mb-1">المبلغ (SDG)</label>
@@ -248,8 +313,18 @@ const CashFundsPage = () => {
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-6">
-              <Button variant="secondary" onClick={() => setMovementFund(null)} disabled={submitting}>إلغاء</Button>
-              <Button variant="primary" onClick={handleMovementSubmit} disabled={submitting}>
+              <Button
+                variant="secondary"
+                onClick={() => setMovementFund(null)}
+                disabled={submitting}
+              >
+                إلغاء
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleMovementSubmit}
+                disabled={submitting}
+              >
                 {submitting ? 'جارٍ...' : movementType === 'deposit' ? 'إيداع' : 'سحب'}
               </Button>
             </div>

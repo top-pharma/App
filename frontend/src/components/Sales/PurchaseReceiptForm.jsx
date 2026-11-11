@@ -286,6 +286,15 @@ const itemId = typeof rawId === 'string' ? rawId : String(rawId);    if (!itemId
   const validate = () => {
     const errors = [];
 
+      // 🔍 تشخيص — احذفه بعد التأكد
+  console.log('🔍 validate — items:', items);
+  console.log('🔍 validate — batches:', items.map(i => ({ 
+    name: i.itemName, 
+    batch: i.batch, 
+    batchType: typeof i.batch,
+    batchLen: i.batch?.length,
+    batchTrim: i.batch?.trim(),
+  })));
     if (!supplier) errors.push('المورّد مطلوب');
     if (!warehouse) errors.push('المخزن مطلوب');
     if (items.length === 0) errors.push('يجب إضافة بند واحد على الأقل');

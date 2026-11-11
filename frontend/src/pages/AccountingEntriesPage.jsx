@@ -6,8 +6,10 @@
  * - عرض تفاصيل القيد (مدين/دائن)
  *
  * ✅ 🅲 (2026-11-08):
- * - حُذفت 5 أسطر CHECK_* من entryTypeLabels:
- *   CHECK_RECEIVED, CHECK_COLLECTED, CHECK_BOUNCED, CHECK_ISSUED, CHECK_PAID.
+ * - حُذفت 5 أسطر CHECK_* من entryTypeLabels.
+ *
+ * ⚠️ إصلاح 2026-11-11:
+ *  - F1: columns بصيغة Table (key/label/render).
  */
 
 import { useState, useEffect } from 'react';
@@ -17,9 +19,6 @@ import Loading from '../components/UI/Loading.jsx';
 import Modal from '../components/UI/Modal.jsx';
 import { formatCurrency, formatDate } from '../utils/formatters.js';
 
-/**
- * ✅ 🅲: حُذفت 5 أنواع CHECK_* (Check أُلغي).
- */
 const entryTypeLabels = {
   SALE_CASH: 'بيع نقدي',
   SALE_CREDIT: 'بيع آجل',
@@ -27,7 +26,6 @@ const entryTypeLabels = {
   CUSTOMER_PAYMENT: 'تحصيل عميل',
   PURCHASE: 'مشتريات',
   PURCHASE_RETURN: 'مرتجع مشتريات',
-  // ⚠️ 🅲: حُذفت CHECK_RECEIVED / CHECK_COLLECTED / CHECK_BOUNCED / CHECK_ISSUED / CHECK_PAID
   CASH_TRANSFER: 'تحويل صندوق',
   CASH_DEPOSIT: 'إيداع نقدي',
   CASH_WITHDRAWAL: 'سحب نقدي',
@@ -39,7 +37,12 @@ const entryTypeLabels = {
 const AccountingEntriesPage = () => {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({ entryType: '', from: '', to: '', search: '' });
+  const [filters, setFilters] = useState({
+    entryType: '',
+    from: '',
+    to: '',
+    search: '',
+  });
   const [selectedEntry, setSelectedEntry] = useState(null);
 
   useEffect(() => {
@@ -52,6 +55,7 @@ const AccountingEntriesPage = () => {
         if (filters.to) params.to = filters.to;
         if (filters.search) params.search = filters.search;
         const result = await accountingEntriesAPI.getAccountingEntries(params);
+        // result.data = { success, data: [], pagination }
         setEntries(result.data || []);
       } catch (err) {
         // Toast
@@ -62,11 +66,12 @@ const AccountingEntriesPage = () => {
     load();
   }, [filters]);
 
+  // ✅ F1: columns بصيغة Table (key/label/render)
   const columns = [
     {
-      header: 'رقم القيد',
-      accessor: 'entryNumber',
-      cell: (row) => (
+      key: 'entryNumber',
+      label: 'رقم القيد',
+      render: (row) => (
         <button
           onClick={() => setSelectedEntry(row)}
           className="font-mono text-blue-600 hover:underline"
@@ -76,46 +81,60 @@ const AccountingEntriesPage = () => {
       ),
     },
     {
-      header: 'التاريخ',
-      accessor: 'entryDate',
-      cell: (row) => formatDate(row.entryDate),
+      key: 'entryDate',
+      label: 'التاريخ',
+      render: (row) => formatDate(row.entryDate),
     },
     {
-      header: 'النوع',
-      accessor: 'entryType',
-      cell: (row) => (
+      key: 'entryType',
+      label: 'النوع',
+      align: 'center',
+      render: (row) => (
         <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 text-xs rounded-full">
           {entryTypeLabels[row.entryType] || row.entryType}
         </span>
       ),
     },
     {
-      header: 'الوصف',
-      accessor: 'description',
-      cell: (row) => <span className="text-sm text-gray-700">{row.description}</span>,
-    },
-    {
-      header: 'المدين',
-      accessor: 'totalDebit',
-      cell: (row) => (
-        <span className="font-bold text-green-700">{formatCurrency(row.totalDebit)}</span>
+      key: 'description',
+      label: 'الوصف',
+      render: (row) => (
+        <span className="text-sm text-gray-700">{row.description}</span>
       ),
     },
     {
-      header: 'الدائن',
-      accessor: 'totalCredit',
-      cell: (row) => (
-        <span className="font-bold text-blue-700">{formatCurrency(row.totalCredit)}</span>
+      key: 'totalDebit',
+      label: 'المدين',
+      align: 'end',
+      render: (row) => (
+        <span className="font-bold text-green-700">
+          {formatCurrency(row.totalDebit)}
+        </span>
       ),
     },
     {
-      header: 'الحالة',
-      accessor: 'isReversed',
-      cell: (row) =>
+      key: 'totalCredit',
+      label: 'الدائن',
+      align: 'end',
+      render: (row) => (
+        <span className="font-bold text-blue-700">
+          {formatCurrency(row.totalCredit)}
+        </span>
+      ),
+    },
+    {
+      key: 'isReversed',
+      label: 'الحالة',
+      align: 'center',
+      render: (row) =>
         row.isReversed ? (
-          <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">مُعكَس</span>
+          <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">
+            مُعكَس
+          </span>
         ) : (
-          <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs rounded-full">نشط</span>
+          <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs rounded-full">
+            نشط
+          </span>
         ),
     },
   ];
@@ -135,7 +154,9 @@ const AccountingEntriesPage = () => {
         >
           <option value="">كل الأنواع</option>
           {Object.entries(entryTypeLabels).map(([key, label]) => (
-            <option key={key} value={key}>{label}</option>
+            <option key={key} value={key}>
+              {label}
+            </option>
           ))}
         </select>
         <input
@@ -159,9 +180,13 @@ const AccountingEntriesPage = () => {
         />
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-        {loading ? <Loading /> : <Table columns={columns} data={entries} emptyMessage="لا توجد قيود" />}
-      </div>
+      <Table
+        columns={columns}
+        data={entries}
+        loading={loading}
+        emptyMessage="لا توجد قيود مطابقة"
+        rowKey="id"
+      />
 
       {/* مودال تفاصيل القيد */}
       {selectedEntry && (
@@ -175,7 +200,9 @@ const AccountingEntriesPage = () => {
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
                 <p className="text-gray-500">النوع</p>
-                <p className="font-medium">{entryTypeLabels[selectedEntry.entryType] || selectedEntry.entryType}</p>
+                <p className="font-medium">
+                  {entryTypeLabels[selectedEntry.entryType] || selectedEntry.entryType}
+                </p>
               </div>
               <div>
                 <p className="text-gray-500">التاريخ</p>
@@ -212,7 +239,9 @@ const AccountingEntriesPage = () => {
                     </tr>
                   ))}
                   <tr className="bg-gray-50 font-bold">
-                    <td className="border p-2" colSpan={2}>الإجمالي</td>
+                    <td className="border p-2" colSpan={2}>
+                      الإجمالي
+                    </td>
                     <td className="border p-2 text-left text-green-700">
                       {formatCurrency(selectedEntry.totalDebit)}
                     </td>

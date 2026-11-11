@@ -254,12 +254,27 @@ export const updatePurchaseReceiptSchema = purchaseReceiptBaseSchema
   });
 
 // ============================================================
-// 5) تأكيد الاستلام
+// 5) تأكيد الاستلام (Confirm Receipt)
 // ============================================================
 
+/**
+ * POST /api/purchase-receipts/:id/confirm
+ *
+ * ⚠️ إصلاح 2026-11-11:
+ *  - إضافة `cashFundId` + `bankAccountId` — لتحديد مصدر الدفع.
+ *  - إضافة `initialPayment` + `initialPaymentMethod` — لدعم تعديل الدفعة عند التأكيد.
+ */
 export const confirmPurchaseReceiptSchema = z.object({
   receivedAt: optionalDateSchema,
   notes: optionalTextSchema(500),
+
+  // ✅ مصدر الدفع (إلزامي إذا paidAmount > 0)
+  cashFundId: optionalObjectIdSchema,
+  bankAccountId: optionalObjectIdSchema,
+
+  // ✅ الدفعة (اختياري — إذا مُرِّر، يُحدَّث)
+  initialPayment: initialPaymentSchema,
+  initialPaymentMethod: z.enum(['cash', 'bank', 'check']).optional(),
 });
 
 // ============================================================

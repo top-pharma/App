@@ -2,6 +2,9 @@
  * CashTransactionsPage.jsx
  *
  * صفحة عرض حركات النقدية.
+ *
+ * ⚠️ إصلاح 2026-11-11:
+ *  - F1: columns بصيغة Table (key/label/render).
  */
 
 import { useState, useEffect } from 'react';
@@ -11,15 +14,16 @@ import Table from '../components/UI/Table.jsx';
 import Loading from '../components/UI/Loading.jsx';
 import { formatCurrency, formatDate } from '../utils/formatters.js';
 
-const methodLabels = { cash: 'نقدي', bank: 'بنك', check: 'شيك' };
+const methodLabels = { cash: 'نقدي', bank: 'بنك' };
+
 const refLabels = {
   invoice: 'فاتورة',
   customer_return: 'مرتجع عميل',
   purchase: 'مشتريات',
-  check: 'شيك',
+  supplier_return: 'مرتجع مورد',
+  transfer: 'تحويل',
   manual: 'يدوي',
   expense: 'مصروف',
-  delivery_note: 'إيصال',
 };
 
 const CashTransactionsPage = () => {
@@ -44,6 +48,7 @@ const CashTransactionsPage = () => {
         if (filters.to) params.to = filters.to;
         if (filters.search) params.search = filters.search;
         const result = await cashTransactionsAPI.getCashTransactions(params);
+        // result.data = { success, data: [], pagination }
         setTransactions(result.data || []);
       } catch (err) {
         // Toast
@@ -54,19 +59,23 @@ const CashTransactionsPage = () => {
     load();
   }, [filters]);
 
+  // ✅ F1: columns بصيغة Table (key/label/render)
   const columns = [
     {
-      header: 'التاريخ',
-      accessor: 'transactionDate',
-      cell: (row) => formatDate(row.transactionDate),
+      key: 'transactionDate',
+      label: 'التاريخ',
+      render: (row) => formatDate(row.transactionDate),
     },
     {
-      header: 'الاتجاه',
-      accessor: 'direction',
-      cell: (row) => (
+      key: 'direction',
+      label: 'الاتجاه',
+      align: 'center',
+      render: (row) => (
         <span
           className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full ${
-            row.direction === 'in' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+            row.direction === 'in'
+              ? 'bg-green-100 text-green-800'
+              : 'bg-red-100 text-red-800'
           }`}
         >
           {row.direction === 'in' ? <ArrowDown size={12} /> : <ArrowUp size={12} />}
@@ -75,33 +84,44 @@ const CashTransactionsPage = () => {
       ),
     },
     {
-      header: 'الطريقة',
-      accessor: 'method',
-      cell: (row) => methodLabels[row.method] || row.method,
+      key: 'method',
+      label: 'الطريقة',
+      render: (row) => methodLabels[row.method] || row.method,
     },
     {
-      header: 'الصندوق / البنك',
-      cell: (row) =>
-        row.cashFundId?.name || row.bankAccountId?.bankName || '-',
+      key: 'cashFundId',
+      label: 'الصندوق / البنك',
+      render: (row) => {
+        if (row.cashFundId?.name) return row.cashFundId.name;
+        if (row.bankAccountId?.bankName) return row.bankAccountId.bankName;
+        return '—';
+      },
     },
     {
-      header: 'المبلغ',
-      accessor: 'amount',
-      cell: (row) => (
-        <span className={`font-bold ${row.direction === 'in' ? 'text-green-700' : 'text-red-700'}`}>
+      key: 'amount',
+      label: 'المبلغ',
+      align: 'end',
+      render: (row) => (
+        <span
+          className={`font-bold ${
+            row.direction === 'in' ? 'text-green-700' : 'text-red-700'
+          }`}
+        >
           {row.direction === 'in' ? '+' : '-'} {formatCurrency(row.amount)} SDG
         </span>
       ),
     },
     {
-      header: 'المصدر',
-      accessor: 'referenceType',
-      cell: (row) => refLabels[row.referenceType] || row.referenceType || '-',
+      key: 'referenceType',
+      label: 'المصدر',
+      render: (row) => refLabels[row.referenceType] || row.referenceType || '—',
     },
     {
-      header: 'الوصف',
-      accessor: 'description',
-      cell: (row) => <span className="text-sm text-gray-600">{row.description}</span>,
+      key: 'description',
+      label: 'الوصف',
+      render: (row) => (
+        <span className="text-sm text-gray-600">{row.description}</span>
+      ),
     },
   ];
 
@@ -121,7 +141,6 @@ const CashTransactionsPage = () => {
           <option value="all">كل الطرق</option>
           <option value="cash">نقدي</option>
           <option value="bank">بنك</option>
-          <option value="check">شيك</option>
         </select>
         <select
           value={filters.direction}
@@ -137,14 +156,12 @@ const CashTransactionsPage = () => {
           value={filters.from}
           onChange={(e) => setFilters({ ...filters, from: e.target.value })}
           className="px-3 py-2 border border-gray-300 rounded-md text-sm"
-          placeholder="من"
         />
         <input
           type="date"
           value={filters.to}
           onChange={(e) => setFilters({ ...filters, to: e.target.value })}
           className="px-3 py-2 border border-gray-300 rounded-md text-sm"
-          placeholder="إلى"
         />
         <input
           type="text"
@@ -155,9 +172,13 @@ const CashTransactionsPage = () => {
         />
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-        {loading ? <Loading /> : <Table columns={columns} data={transactions} emptyMessage="لا توجد حركات" />}
-      </div>
+      <Table
+        columns={columns}
+        data={transactions}
+        loading={loading}
+        emptyMessage="لا توجد حركات نقدية مطابقة"
+        rowKey="id"
+      />
     </div>
   );
 };

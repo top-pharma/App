@@ -7,6 +7,10 @@
  * - دعم أنواع متعددة (text, email, password, number, ...).
  * - دعم الأخطاء والمساعدة.
  * - دعم الأيقونات.
+ *
+ * ⚠️ إصلاح 2026-11-11:
+ *  - F1: استخراج `containerClassName` — لا يُمرَّر إلى `<input>` (React warning).
+ *  - F2: استخدام `containerClassName` على `<div>` الحاوي.
  */
 
 import { forwardRef, useState } from 'react';
@@ -27,7 +31,8 @@ import { Eye, EyeOff } from 'lucide-react';
  * @param {boolean} [props.required=false] - مطلوب
  * @param {boolean} [props.disabled=false] - معطّل
  * @param {string} [props.placeholder] - النص التوضيحي
- * @param {string} [props.className] - أنماط إضافية
+ * @param {string} [props.className] - أنماط إضافية للحقل
+ * @param {string} [props.containerClassName] - أنماط إضافية للحاوي
  * @param {string} [props.id] - المعرّف
  * @returns {JSX.Element}
  */
@@ -42,6 +47,8 @@ const Input = forwardRef(function Input(
     disabled = false,
     placeholder,
     className = '',
+    // ✅ F1: استخراج containerClassName — لا يدخل ...rest
+    containerClassName = '',
     id,
     ...rest
   },
@@ -71,7 +78,8 @@ const Input = forwardRef(function Input(
   `;
 
   return (
-    <div className="w-full">
+    // ✅ F2: containerClassName على <div> الحاوي
+    <div className={`w-full ${containerClassName}`}>
       {/* ✅ التسمية */}
       {label && (
         <label

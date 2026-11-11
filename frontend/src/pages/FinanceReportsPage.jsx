@@ -1,15 +1,24 @@
 /**
  * @file FinanceReportsPage.jsx
  * @description
- * صفحة التقارير المالية — 6 تقارير في Tabs.
+ * صفحة التقارير المالية — 5 تقارير في Tabs.
  *
  * التقارير:
  *   1. ميزان المراجعة (trial-balance)
  *   2. الحركات النقدية (cash-transactions)
  *   3. أرصدة الصناديق (fund-balances)
- *   4. الشيكات (checks)
- *   5. المصروفات (expenses)
- *   6. الإيرادات - المصروفات (income-summary)
+ *   4. المصروفات (expenses)
+ *   5. الإيرادات - المصروفات (income-summary)
+ *
+ * ⚠️ إصلاح 2026-11-11:
+ *  - F1: حُذف "الشيكات" (Check أُلغي في 🅲).
+ *  - F2: حُذف checkStatus + checkType (غير مستخدمين).
+ *  - F3: حُذف Receipt من imports.
+ *  - F4: حُذف getChecks من loadReport.
+ *  - F5: حُذف case 'checks' من renderReport.
+ *  - F6: حُذف if (activeTab === 'checks') من extraFilters.
+ *  - F7: حُذف setCheckStatus/setCheckType من handleReset.
+ *  - F8: حُذف if (activeTab === 'checks') من buildExportParams.
  */
 
 import { useEffect, useState } from 'react';
@@ -18,7 +27,6 @@ import {
   Scale,
   Banknote,
   Wallet,
-  Receipt,
   DollarSign,
   TrendingUp,
   RefreshCw,
@@ -47,14 +55,19 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 const fmt = (n) =>
   typeof n === 'number'
-    ? new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
+    ? new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(n)
     : n ?? '—';
 
+/**
+ * ✅ F1: 5 تقارير (بدل 6 — حُذف "الشيكات").
+ */
 const TABS = [
   { key: 'trial-balance', label: 'ميزان المراجعة', icon: Scale, usesDate: true },
   { key: 'cash-transactions', label: 'الحركات النقدية', icon: Banknote, usesDate: true },
   { key: 'fund-balances', label: 'أرصدة الصناديق', icon: Wallet, usesDate: false },
-  { key: 'checks', label: 'الشيكات', icon: Receipt, usesDate: true },
   { key: 'expenses', label: 'المصروفات', icon: DollarSign, usesDate: true },
   { key: 'income-summary', label: 'الإيرادات - المصروفات', icon: TrendingUp, usesDate: true },
 ];
@@ -68,13 +81,11 @@ export default function FinanceReportsPage() {
   const activeTab = searchParams.get('tab') || 'trial-balance';
   const tabDef = TABS.find((t) => t.key === activeTab) || TABS[0];
 
-  // فلاتر
+  // ✅ F2: فلاتر (بدون checkStatus/checkType)
   const [from, setFrom] = useState(firstOfMonth());
   const [to, setTo] = useState(today());
   const [direction, setDirection] = useState('all');
   const [method, setMethod] = useState('all');
-  const [checkStatus, setCheckStatus] = useState('all');
-  const [checkType, setCheckType] = useState('all');
 
   // حالة
   const [loading, setLoading] = useState(false);
@@ -98,14 +109,7 @@ export default function FinanceReportsPage() {
         case 'fund-balances':
           result = await api.getFundBalances();
           break;
-        case 'checks':
-          result = await api.getChecks({
-            from: from || undefined,
-            to: to || undefined,
-            status: checkStatus,
-            type: checkType,
-          });
-          break;
+        // ✅ F4: حُذف case 'checks'
         case 'expenses':
           result = await api.getExpenses({ from, to });
           break;
@@ -142,8 +146,7 @@ export default function FinanceReportsPage() {
     setTo(today());
     setDirection('all');
     setMethod('all');
-    setCheckStatus('all');
-    setCheckType('all');
+    // ✅ F7: حُذف setCheckStatus/setCheckType
     setData(null);
     setError(null);
   };
@@ -153,8 +156,7 @@ export default function FinanceReportsPage() {
     if (activeTab === 'fund-balances') return {};
     if (activeTab === 'cash-transactions')
       return { from, to, direction, method };
-    if (activeTab === 'checks')
-      return { from: from || undefined, to: to || undefined, status: checkStatus, type: checkType };
+    // ✅ F8: حُذف if (activeTab === 'checks')
     return { from, to };
   };
 
@@ -392,98 +394,7 @@ export default function FinanceReportsPage() {
         );
       }
 
-      /* ───── 4. الشيكات ───── */
-      case 'checks': {
-        const kpis = [
-          {
-            label: 'معلّق',
-            value: `${data.totals.pendingCount} شيك`,
-            subValue: `${fmt(data.totals.pending)} SDG`,
-            color: 'orange',
-          },
-          {
-            label: 'مصروف',
-            value: `${data.totals.paidCount} شيك`,
-            subValue: `${fmt(data.totals.paid)} SDG`,
-            color: 'green',
-          },
-          {
-            label: 'مرتد',
-            value: `${data.totals.bouncedCount} شيك`,
-            subValue: `${fmt(data.totals.bounced)} SDG`,
-            color: 'red',
-          },
-          {
-            label: 'متأخر',
-            value: `${data.totals.overdueCount} شيك`,
-            subValue: `${fmt(data.totals.overdue)} SDG`,
-            color: data.totals.overdueCount > 0 ? 'red' : 'neutral',
-          },
-        ];
-
-        const columns = [
-          { key: 'checkNumber', label: 'الرقم' },
-          { key: 'typeLabel', label: 'النوع', align: 'center' },
-          { key: 'bankName', label: 'البنك' },
-          {
-            key: 'partyName',
-            label: 'الطرف',
-            render: (row) => row.customerName || row.supplierName || '—',
-          },
-          {
-            key: 'amount',
-            label: 'المبلغ',
-            align: 'end',
-            render: (row) => fmt(row.amount),
-          },
-          { key: 'dueDateLabel', label: 'الاستحقاق', align: 'center' },
-          {
-            key: 'status',
-            label: 'الحالة',
-            align: 'center',
-            render: (row) => {
-              const statusMap = {
-                pending: { label: 'معلّق', class: 'bg-orange-100 text-orange-700' },
-                paid: { label: 'مصروف', class: 'bg-green-100 text-green-700' },
-                bounced: { label: 'مرتد', class: 'bg-red-100 text-red-700' },
-                cancelled: { label: 'ملغى', class: 'bg-neutral-100 text-neutral-600' },
-              };
-              const s = statusMap[row.status] || statusMap.cancelled;
-              return (
-                <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-medium ${s.class}`}>
-                  {s.label}
-                </span>
-              );
-            },
-          },
-          {
-            key: 'isOverdue',
-            label: 'ملاحظة',
-            align: 'center',
-            render: (row) =>
-              row.isOverdue ? (
-                <span className="text-red-600 text-[11px] font-medium">
-                  ⚠️ متأخر {Math.abs(row.daysUntilDue)} يوم
-                </span>
-              ) : (
-                '—'
-              ),
-          },
-        ];
-
-        return (
-          <div className="space-y-4">
-            <KpiCards items={kpis} />
-            <Table
-              columns={columns}
-              data={data.lines}
-              emptyMessage="لا توجد شيكات مطابقة للفلاتر"
-            />
-          </div>
-        );
-      }
-
-      /* ───── 5. المصروفات ───── */
+      /* ───── 4. المصروفات ───── */
       case 'expenses': {
         const kpis = [
           {
@@ -519,7 +430,7 @@ export default function FinanceReportsPage() {
         );
       }
 
-      /* ───── 6. الإيرادات - المصروفات ───── */
+      /* ───── 5. الإيرادات - المصروفات ───── */
       case 'income-summary': {
         const kpis = [
           {
@@ -584,6 +495,8 @@ export default function FinanceReportsPage() {
         );
       }
 
+      // ✅ F5: حُذف case 'checks'
+
       default:
         return null;
     }
@@ -613,7 +526,6 @@ export default function FinanceReportsPage() {
               { value: 'all', label: 'الكل' },
               { value: 'cash', label: 'صندوق' },
               { value: 'bank', label: 'بنك' },
-              { value: 'check', label: 'شيك' },
             ]}
             containerClassName="w-32"
           />
@@ -621,36 +533,7 @@ export default function FinanceReportsPage() {
       );
     }
 
-    if (activeTab === 'checks') {
-      return (
-        <>
-          <Select
-            label="الحالة"
-            value={checkStatus}
-            onChange={(e) => setCheckStatus(e.target.value)}
-            options={[
-              { value: 'all', label: 'الكل' },
-              { value: 'pending', label: 'معلّق' },
-              { value: 'paid', label: 'مصروف' },
-              { value: 'bounced', label: 'مرتد' },
-              { value: 'cancelled', label: 'ملغى' },
-            ]}
-            containerClassName="w-32"
-          />
-          <Select
-            label="النوع"
-            value={checkType}
-            onChange={(e) => setCheckType(e.target.value)}
-            options={[
-              { value: 'all', label: 'الكل' },
-              { value: 'incoming', label: 'وارد' },
-              { value: 'outgoing', label: 'صادر' },
-            ]}
-            containerClassName="w-32"
-          />
-        </>
-      );
-    }
+    // ✅ F6: حُذف if (activeTab === 'checks')
 
     return null;
   };
@@ -668,6 +551,7 @@ export default function FinanceReportsPage() {
         </div>
         <ExportButtons
           reportName={activeTab}
+          category="finance"
           params={buildExportParams()}
           onError={(msg) => setError(msg)}
         />

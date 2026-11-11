@@ -201,16 +201,21 @@ export const listPurchaseReceipts = async (req, res, next) => {
 
 /* ─────────────────────────────────────────────────────────────
  * GET /api/purchase-receipts/:id
+ *
+ * ⚠️ إصلاح 2026-11-11:
+ *  - إزالة `populate('confirmedBy')` + `populate('cancelledBy')` —
+ *    غير موجودين في `PurchaseReceipt.js` Schema.
+ *  - `receivedBy` موجود — يُستخدم بدلاً من `confirmedBy`.
  * ───────────────────────────────────────────────────────────── */
 export const getPurchaseReceipt = async (req, res, next) => {
   try {
     const receipt = await PurchaseReceipt.findById(req.params.id)
-      .populate('supplier', 'name phone code address')    // ✅ supplier
+      .populate('supplier', 'name phone code address')
       .populate('warehouse', 'name code')
-      .populate('items.item', 'tradeName scientificName units barcode')  // ✅ item
+      .populate('items.item', 'tradeName scientificName units barcode')
       .populate('createdBy', 'fullName')
-      .populate('confirmedBy', 'fullName')
-      .populate('cancelledBy', 'fullName');
+      .populate('receivedBy', 'fullName');
+      // ⚠️ confirmedBy / cancelledBy غير موجودين — لا populate
 
     if (!receipt) {
       throw new AppError('الإيصال غير موجود', 404, 'RECEIPT_NOT_FOUND');
@@ -448,6 +453,10 @@ export const updatePurchaseReceipt = async (req, res, next) => {
 /* ─────────────────────────────────────────────────────────────
  * POST /api/purchase-receipts/:id/confirm
  * تأكيد الإيصال — Stock + CashTransaction + PURCHASE entry.
+ *
+ * ⚠️ إصلاح 2026-11-11:
+ *  - H11: `returnStock` تستدعى لكل بند (لأنها لدفعة واحدة — لا bulk).
+ *  - H11: `meta` يحمل `expiry`/`unitCost`/`unitPrice` (للإنشاء التلقائي).
  * ───────────────────────────────────────────────────────────── */
 export const confirmPurchaseReceipt = async (req, res, next) => {
   try {
@@ -467,7 +476,6 @@ export const confirmPurchaseReceipt = async (req, res, next) => {
     }
 
     // ✅ Model: initialPayment = { amount, method }
-    // إذا مُرِّر من الـ body → نستخدمه، وإلا نأخذ من المسودة
     let paidAmount;
     let method;
     if (initialPayment !== undefined) {
@@ -488,19 +496,23 @@ export const confirmPurchaseReceipt = async (req, res, next) => {
       throw new AppError('الحساب البنكي مطلوب للدفع البنكي', 400, 'MISSING_BANK_ACCOUNT');
     }
 
-    // ─── 1) إضافة Stock (عبر returnStock كـ Upsert) ───
+    // ─── 1) إضافة Stock (returnStock لكل بند — لأنها لدفعة واحدة) ───
     try {
-      await returnStock({
-        issuedLots: receipt.items.map((it) => ({
-          itemId: it.item,                        // ✅ Model: item
+      for (const it of receipt.items) {
+        // eslint-disable-next-line no-await-in-loop
+        await returnStock({
+          itemId: it.item,
           warehouseId: receipt.warehouse,
           batch: it.batch,
-          expiry: it.expiry,
           quantity: it.quantity,
-          unitCost: it.unitCost,
-        })),
-        user: req.user,
-      });
+          meta: {
+            expiry: it.expiry,
+            unitCost: it.unitCost,
+            unitPrice: it.unitPrice || 0,
+            notes: `استلام من إيصال ${receipt.receiptNumber}`,
+          },
+        });
+      }
     } catch (err) {
       logger.error(`[purchaseReceipt] فشل إدخال Stock: ${err.message}`);
       throw new AppError('فشل إدخال المخزون', 500, 'STOCK_ADD_FAILED');
@@ -536,7 +548,7 @@ export const confirmPurchaseReceipt = async (req, res, next) => {
       );
     }
 
-    // ─── 4) PURCHASE entry (مخزون مدين / صندوق أو ذمم دائن) ───
+    // ─── 4) PURCHASE entry ───
     try {
       const lines = [
         {
@@ -583,7 +595,6 @@ export const confirmPurchaseReceipt = async (req, res, next) => {
         user: req.user,
       });
     } catch (err) {
-      // Rollback Supplier
       if (remainingAmount > 0) {
         await Supplier.updateOne(
           { _id: receipt.supplier },

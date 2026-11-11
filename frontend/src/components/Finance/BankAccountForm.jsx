@@ -1,8 +1,10 @@
 /**
  * BankAccountForm.jsx
  *
- * نموذج إنشاء/تعديل حساب بنكي.
- * ملاحظة: النظام يدعم حساباً واحداً فقط — الإنشاء يُعطّل السابق تلقائياً.
+ * ⚠️ إصلاح 2026-11-12:
+ *  - F1: isActive — true دائماً (بدل initialData.isActive !== false).
+ *  - F2: onSubmit — isActive: true (إذا isEdit).
+ *  - F3: branch — initialData.branchName || initialData.branch.
  */
 
 import { useEffect } from 'react';
@@ -52,12 +54,13 @@ const BankAccountForm = ({ isOpen, onClose, onSubmit, initialData = null, isEdit
         reset({
           bankName: initialData.bankName || '',
           accountNumber: initialData.accountNumber || '',
-          accountName: initialData.accountName || '',
-          branch: initialData.branch || '',
+          accountName: initialData.accountName || initialData.name || '',
+          branch: initialData.branchName || initialData.branch || '',
           iban: initialData.iban || '',
           swift: initialData.swift || '',
           openingBalance: initialData.openingBalance || 0,
-          isActive: initialData.isActive !== false,
+          // ✅ F1: isActive — true دائماً
+          isActive: true,
           notes: initialData.notes || '',
         });
       } else {
@@ -80,6 +83,8 @@ const BankAccountForm = ({ isOpen, onClose, onSubmit, initialData = null, isEdit
     try {
       const payload = { ...data, currency: 'SDG' };
       if (isEdit) delete payload.openingBalance;
+      // ✅ F2: isActive — true دائماً (إذا isEdit)
+      if (isEdit) payload.isActive = true;
       await onSubmit(payload);
       onClose();
     } catch (err) {

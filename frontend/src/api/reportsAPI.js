@@ -47,15 +47,6 @@ export async function getFundBalances() {
 }
 
 /**
- * الشيكات.
- * @param {Object} params - { from, to, status, type }
- */
-export async function getChecks(params = {}) {
-  const { data } = await axiosInstance.get('/reports/finance/checks', { params });
-  return data.data;
-}
-
-/**
  * المصروفات.
  * @param {{from: string, to: string}} params
  */
@@ -125,7 +116,6 @@ export default {
   getTrialBalance,
   getCashTransactions,
   getFundBalances,
-  getChecks,
   getExpenses,
   getIncomeSummary,
   exportFinanceReport,

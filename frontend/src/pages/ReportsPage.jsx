@@ -18,7 +18,7 @@ const GROUPS = [
     icon: Wallet,
     color: 'blue',
     to: '/reports/finance',
-    count: 6,
+    count: 5,
     available: true,
   },
   {

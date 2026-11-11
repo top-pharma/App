@@ -3,9 +3,9 @@
  * @description
  * صفحة إدارة إيصالات استلام المشتريات من الموردين.
  *
- * ⚠️ إصلاح 2026-11-10:
- *  - إزالة `useNavigate` + `Eye` (غير مستخدمين).
- *  - `row.supplier?.name` يعمل بعد إصلاح `populate('supplier')` في Controller.
+ * ⚠️ إصلاح 2026-11-11:
+ *  - H10: إضافة `CashSelector` في مودال التأكيد — لإرسال `cashFundId`/`bankAccountId`.
+ *  - H10: `handleConfirmReceipt` يُرسل `cashFundId`/`bankAccountId` — بدل `{}`.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -20,6 +20,7 @@ import {
   Ban,
   PackageCheck,
   XCircle,
+  Banknote,
 } from 'lucide-react';
 
 import { useAuth } from '../hooks/useAuth.js';
@@ -32,6 +33,7 @@ import Table from '../components/UI/Table.jsx';
 import Pagination from '../components/UI/Pagination.jsx';
 import Modal from '../components/UI/Modal.jsx';
 import PurchaseReceiptForm from '../components/Sales/PurchaseReceiptForm.jsx';
+import CashSelector from '../components/Finance/CashSelector.jsx';
 
 import { formatCurrency, formatDate, formatNumber } from '../utils/formatters.js';
 import { PAYMENT_TYPE_LABELS_AR } from '../utils/constants.js';
@@ -100,6 +102,10 @@ function PurchaseReceiptsPage() {
   const [cancelTarget, setCancelTarget] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+
+  // ─── حالة التأكيد (H10) ───
+  const [cashFundId, setCashFundId] = useState('');
+  const [bankAccountId, setBankAccountId] = useState('');
 
   // ─── Debounce البحث ───
   useEffect(() => {
@@ -177,15 +183,44 @@ function PurchaseReceiptsPage() {
     loadStats();
   };
 
-  // ─── تأكيد الاستلام ───
+  // ─── فتح مودال التأكيد (H10) ───
+  const handleOpenConfirm = (row) => {
+    setConfirmTarget(row);
+    setCashFundId('');
+    setBankAccountId('');
+  };
+
+  // ─── تأكيد الاستلام (H10) ───
   const handleConfirmReceipt = async () => {
     if (!confirmTarget) return;
 
+    // ✅ التحقق من cashFundId إذا دفع نقدي
+    const paidAmount = Number(confirmTarget.paidAmount) || 0;
+    const method = confirmTarget.paymentType === 'cash' ? 'cash' : 'bank';
+
+    if (paidAmount > 0 && method === 'cash' && !cashFundId) {
+      toast.error('اختر الصندوق أولاً.');
+      return;
+    }
+    if (paidAmount > 0 && method === 'bank' && !bankAccountId) {
+      toast.error('اختر الحساب البنكي أولاً.');
+      return;
+    }
+
     setIsProcessing(true);
     try {
-      await purchaseReceiptsAPI.confirmPurchaseReceipt(confirmTarget.id, {});
+      // ✅ إرسال cashFundId/bankAccountId
+      const payload = {};
+      if (paidAmount > 0) {
+        if (method === 'cash') payload.cashFundId = cashFundId;
+        if (method === 'bank') payload.bankAccountId = bankAccountId;
+      }
+
+      await purchaseReceiptsAPI.confirmPurchaseReceipt(confirmTarget.id, payload);
       toast.success('تم تأكيد الاستلام وإضافة البضاعة للمخزون.');
       setConfirmTarget(null);
+      setCashFundId('');
+      setBankAccountId('');
       loadReceipts();
       loadStats();
     } catch (err) {
@@ -293,7 +328,7 @@ function PurchaseReceiptsPage() {
                 variant="ghost"
                 size="sm"
                 icon={PackageCheck}
-                onClick={() => setConfirmTarget(row)}
+                onClick={() => handleOpenConfirm(row)}
               >
                 تأكيد
               </Button>
@@ -445,15 +480,27 @@ function PurchaseReceiptsPage() {
         />
       </Modal>
 
-      {/* ═══ مودال تأكيد الاستلام ═══ */}
+      {/* ═══ مودال تأكيد الاستلام (H10) ═══ */}
       <Modal
         isOpen={Boolean(confirmTarget)}
-        onClose={() => setConfirmTarget(null)}
+        onClose={() => {
+          setConfirmTarget(null);
+          setCashFundId('');
+          setBankAccountId('');
+        }}
         title="تأكيد الاستلام"
         size="md"
         footer={
           <>
-            <Button variant="ghost" onClick={() => setConfirmTarget(null)} disabled={isProcessing}>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setConfirmTarget(null);
+                setCashFundId('');
+                setBankAccountId('');
+              }}
+              disabled={isProcessing}
+            >
               إلغاء
             </Button>
             <Button variant="primary" onClick={handleConfirmReceipt} loading={isProcessing}>
@@ -464,6 +511,7 @@ function PurchaseReceiptsPage() {
       >
         {confirmTarget && (
           <div className="space-y-4">
+            {/* ملخص */}
             <div className="bg-neutral-50 rounded-md p-3 text-sm space-y-1">
               <div className="flex justify-between">
                 <span>رقم الإيصال:</span>
@@ -477,8 +525,46 @@ function PurchaseReceiptsPage() {
                 <span>الإجمالي:</span>
                 <span className="font-bold numeric">{formatCurrency(confirmTarget.total)}</span>
               </div>
+              {confirmTarget.paidAmount > 0 && (
+                <div className="flex justify-between">
+                  <span>المدفوع:</span>
+                  <span className="font-bold numeric text-primary-700">
+                    {formatCurrency(confirmTarget.paidAmount)}
+                  </span>
+                </div>
+              )}
             </div>
 
+            {/* CashSelector — إذا دفع */}
+            {Number(confirmTarget.paidAmount) > 0 && (
+              <div className="border-t border-neutral-200 pt-3">
+                <h4 className="text-sm font-bold text-neutral-900 mb-2 flex items-center gap-2">
+                  <Banknote size={16} className="text-primary-700" />
+                  مصدر الدفع
+                </h4>
+                <CashSelector
+                  method={confirmTarget.paymentType === 'cash' ? 'cash' : 'bank'}
+                  value={
+                    confirmTarget.paymentType === 'cash' ? cashFundId : bankAccountId
+                  }
+                  onChange={
+                    confirmTarget.paymentType === 'cash' ? setCashFundId : setBankAccountId
+                  }
+                  required
+                  showBalance
+                  label={
+                    confirmTarget.paymentType === 'cash'
+                      ? 'الصندوق المستلم منه'
+                      : 'الحساب البنكي'
+                  }
+                />
+                <p className="text-xs text-neutral-500 mt-1">
+                  سيُخصم {formatCurrency(confirmTarget.paidAmount)} من هذا المصدر.
+                </p>
+              </div>
+            )}
+
+            {/* تنبيه */}
             <div className="bg-success-50 border border-success-200 rounded p-3 text-sm text-success-800">
               <CheckCircle2 size={16} className="inline mr-1" />
               بعد التأكيد:
@@ -488,7 +574,10 @@ function PurchaseReceiptsPage() {
                   <li>سيُضاف المبلغ المتبقي إلى رصيد المورد.</li>
                 )}
                 {confirmTarget.paidAmount > 0 && (
-                  <li>ستُسجَّل دفعة بمبلغ {formatCurrency(confirmTarget.paidAmount)}.</li>
+                  <li>
+                    ستُسجَّل دفعة بمبلغ {formatCurrency(confirmTarget.paidAmount)} من{' '}
+                    {confirmTarget.paymentType === 'cash' ? 'الصندوق' : 'الحساب البنكي'}.
+                  </li>
                 )}
               </ul>
             </div>

@@ -10,6 +10,10 @@
  * - حُذفت بطاقة "الشيكات".
  * - حُذف قسم التنبيهات (upcoming + overdue).
  * - حُذف FileText من imports (كان للشيكات فقط).
+ *
+ * ⚠️ إصلاح 2026-11-11 (F1):
+ * - استخدام `currentBalance` بدل `balance` (virtual لا يعمل مع .lean()).
+ * - `funds` + `activeAccount` من Context — `.lean()` — لا virtuals.
  */
 
 import { Link } from 'react-router-dom';
@@ -21,17 +25,19 @@ import {
 } from 'lucide-react';
 import { useCashFundsContext } from '../context/CashFundsContext.jsx';
 import { useBankAccountsContext } from '../context/BankAccountsContext.jsx';
-// ⚠️ 🅲: حُذف import useChecksContext
 import Card from '../components/UI/Card.jsx';
 import { formatCurrency } from '../utils/formatters.js';
 
 const FinancePage = () => {
   const { funds } = useCashFundsContext();
   const { activeAccount } = useBankAccountsContext();
-  // ⚠️ 🅲: حُذف useChecksContext
 
-  const totalCashBalance = funds.reduce((sum, f) => sum + (f.balance || 0), 0);
-  const bankBalance = activeAccount?.balance || 0;
+  // ✅ F1: استخدام currentBalance (لا balance — virtual لا يعمل مع .lean())
+  const totalCashBalance = funds.reduce(
+    (sum, f) => sum + (Number(f.currentBalance) || Number(f.balance) || 0),
+    0
+  );
+  const bankBalance = Number(activeAccount?.currentBalance) || Number(activeAccount?.balance) || 0;
 
   const cards = [
     {
@@ -41,7 +47,7 @@ const FinancePage = () => {
       color: 'bg-blue-500',
       path: '/finance/cash-funds',
       stat: `${formatCurrency(totalCashBalance)} SDG`,
-      statLabel: 'إجمالي الرصيد',
+      statLabel: `${funds.length} صندوق`,
     },
     {
       title: 'الحساب البنكي',
@@ -52,7 +58,6 @@ const FinancePage = () => {
       stat: activeAccount ? `${formatCurrency(bankBalance)} SDG` : 'لا يوجد',
       statLabel: activeAccount ? 'رصيد البنك' : 'حساب',
     },
-    // ⚠️ 🅲: حُذفت بطاقة "الشيكات"
     {
       title: 'الحركات النقدية',
       description: 'سجل الحركات النقدية',
@@ -79,8 +84,6 @@ const FinancePage = () => {
         <h1 className="text-3xl font-bold text-gray-900">المالية</h1>
         <p className="text-gray-600 mt-1">إدارة الصناديق والبنك والقيود</p>
       </div>
-
-      {/* ⚠️ 🅲: حُذف قسم التنبيهات (upcoming + overdue) */}
 
       {/* بطاقات التنقل */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

@@ -4,10 +4,11 @@
  *
  * ✅ (2026-11-10):
  * - 6 KPIs: إجمالي + غير مدفوعة + متأخرة + مبدئية + دفعات قاربة + تحت الحد.
- * - أحدث 5 فواتير — مع fetchInvoices في useEffect (لضمان التحميل الفوري).
+ * - أحدث 5 فواتير.
  * - إعادة ترتيب: KPIs → أحدث → تنبيهات → تقارير → وصول سريع → مشتريات.
  * - اسم الشركة: "شركة توب فارمة التجارية لتوزيع الأدوية".
  * - ⚠️ لا زر تحديث — بناءً على طلب المستخدم.
+ * - ✅ إصلاح: fetchExpiringSoon + fetchBelowReorder عند mount.
  */
 
 import { useEffect } from 'react';
@@ -126,14 +127,22 @@ function Dashboard() {
     fetchStats: fetchInvoiceStats,
     fetchInvoices,
   } = useInvoices();
-  const { stats: returnStats } = useCustomerReturns();
-  const { expiringSoon, belowReorder } = useStock();
+  const { stats: returnStats, fetchStats: fetchReturnStats } = useCustomerReturns();
+  const {
+    expiringSoon,
+    belowReorder,
+    fetchExpiringSoon,
+    fetchBelowReorder,
+  } = useStock();
 
-  // ✅ تحميل أولي — stats + أحدث 5 فواتير
+  // ✅ تحميل أولي: stats + أحدث 5 فواتير + تنبيهات المخزون
   useEffect(() => {
     fetchInvoiceStats?.();
     fetchInvoices?.({ limit: 5, sortBy: 'invoiceDate', sortOrder: 'desc' });
-  }, [fetchInvoiceStats, fetchInvoices]);
+    fetchReturnStats?.();
+    fetchExpiringSoon?.();
+    fetchBelowReorder?.();
+  }, [fetchInvoiceStats, fetchInvoices, fetchReturnStats, fetchExpiringSoon, fetchBelowReorder]);
 
   const canSeeFinance = isAdmin || isAccountant;
   const canSeeSales = isAdmin || isAccountant || isSalesRep;
@@ -143,7 +152,6 @@ function Dashboard() {
     navigate('/sales/invoices', { state: { openCreateForm: true } });
   };
 
-  // ✅ أحدث 5 فواتير — من invoices (محمّلة عبر fetchInvoices)
   const recentInvoices = (invoices || []).slice(0, 5);
 
   return (

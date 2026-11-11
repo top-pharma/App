@@ -3,15 +3,17 @@
  * @description
  * نموذج إنشاء إيصال استلام مشتريات (مسودة draft).
  *
- * لماذا هذا الملف؟
- * - المشتريات = إدخال بضاعة جديدة (لا FEFO — دفعة جديدة بكل بياناتها).
- * - كل بند: الصنف + رقم الدفعة + تاريخ الإنتاج + تاريخ الصلاحية + التكلفة.
- * - جدول البنود مخصص (يختلف عن InvoiceItemsTable لأنه يحتوي unitCost وproductionDate).
- * - يدعم: نقدي / آجل / جزئي (مع dueDate للآجل والجزئي).
- * - يُحفظ كمسودة — التأثير الفعلي على المخزون يحدث عند "تأكيد الاستلام".
+ * ⚠️ إصلاح 2026-11-10:
+ *  - F1: البحث يعمل عند الفوكس.
+ *  - F2: onFocus يُظهر النتائج دائماً.
+ *  - F3: إغلاق قائمة البحث عند النقر خارجها.
+ *  - F4: توحيد payload مع Backend.
+ *  - F5: حساب total فوراً عند إضافة الصنف.
+ *  - F6: حفظ itemId مباشرة في handlePickItem (يمنع "المُعرّف مطلوب").
+ *  - F7: تحسين مظهر جدول البنود (حقول أكبر + تنسيق احترافي).
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Plus,
   Search,
@@ -42,7 +44,7 @@ import { formatCurrency } from '../../utils/formatters.js';
 
 function Section({ title, icon: Icon, children, description }) {
   return (
-    <div className="bg-white border border-neutral-200 rounded-lg p-4">
+    <div className="bg-white border border-neutral-200 rounded-lg p-4 shadow-sm">
       <div className="flex items-center gap-2 mb-3 pb-2 border-b border-neutral-200">
         {Icon && <Icon size={18} className="text-primary-700" />}
         <h3 className="font-bold text-neutral-900">{title}</h3>
@@ -87,6 +89,7 @@ function Select({ label, value, onChange, options, required, disabled, placehold
 
 function PurchaseReceiptForm({ onSuccess, onCancel }) {
   const toast = useToast();
+  const searchContainerRef = useRef(null);
 
   // ─── الخيارات ───
   const [suppliers, setSuppliers] = useState([]);
@@ -153,27 +156,24 @@ function PurchaseReceiptForm({ onSuccess, onCancel }) {
   // ═══════════════════════════════════════════════
   // 4. البحث عن الأصناف
   // ═══════════════════════════════════════════════
+
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedItemSearch(itemSearch), 300);
+    const timer = setTimeout(() => setDebouncedItemSearch(itemSearch.trim()), 300);
     return () => clearTimeout(timer);
   }, [itemSearch]);
 
   useEffect(() => {
-    if (!debouncedItemSearch || debouncedItemSearch.length < 2) {
-      setItemResults([]);
-      return;
-    }
+    if (!showItemResults) return;
 
     const searchItems = async () => {
       setSearchingItems(true);
       try {
         const result = await itemsAPI.listItems({
-          search: debouncedItemSearch,
+          search: debouncedItemSearch || undefined,
           isActive: true,
           limit: 10,
         });
         setItemResults(result.items || []);
-        setShowItemResults(true);
       } catch {
         setItemResults([]);
       } finally {
@@ -181,23 +181,47 @@ function PurchaseReceiptForm({ onSuccess, onCancel }) {
       }
     };
     searchItems();
-  }, [debouncedItemSearch]);
+  }, [debouncedItemSearch, showItemResults]);
+
+  useEffect(() => {
+    if (!showItemResults) return undefined;
+    const handleClick = (e) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target)) {
+        setShowItemResults(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [showItemResults]);
 
   // ═══════════════════════════════════════════════
-  // 5. إضافة صنف للجدول
+  // 5. إضافة صنف للجدول — ✅ F5+F6
   // ═══════════════════════════════════════════════
   const handlePickItem = (item) => {
+    const baseCost = Number(item.units?.base?.cost) || 0;
+    const basePrice = Number(item.units?.base?.price) || 0;
+    const initialQty = 1;
+
+    // ✅ استخراج itemId مباشرة — من id أو _id
+// ✅ تحويل ObjectId إلى string — لأن Zod يرفض ObjectId
+const rawId = item.id || item._id || '';
+const itemId = typeof rawId === 'string' ? rawId : String(rawId);    if (!itemId) {
+      toast.error('الصنف المحدد لا يحتوي على معرف صالح.');
+      return;
+    }
+
     const newRow = {
+      itemId,                                      // ✅ حفظ itemId مباشرة
       item,
-      itemName: item.tradeName,
+      itemName: item.tradeName || item.name || '—',
       batch: '',
       productionDate: '',
       expiry: '',
-      quantity: 1,
+      quantity: initialQty,
       unit: item.units?.base?.name || item.supportedUnits?.[0] || '',
-      unitCost: item.units?.base?.cost || 0,
-      unitPrice: item.units?.base?.price || 0,
-      total: 0,
+      unitCost: baseCost,
+      unitPrice: basePrice,
+      total: Math.round(initialQty * baseCost * 100) / 100,
     };
     setItems((prev) => [...prev, newRow]);
     setShowItemResults(false);
@@ -219,7 +243,6 @@ function PurchaseReceiptForm({ onSuccess, onCancel }) {
         item[field] = value;
       }
 
-      // إعادة حساب total
       if (['quantity', 'unitCost', 'unitPrice'].includes(field)) {
         const qty = field === 'quantity' ? item[field] : (item.quantity || 0);
         const cost = field === 'unitCost' ? item[field] : (item.unitCost || 0);
@@ -268,6 +291,10 @@ function PurchaseReceiptForm({ onSuccess, onCancel }) {
     if (items.length === 0) errors.push('يجب إضافة بند واحد على الأقل');
 
     for (const it of items) {
+      if (!it.itemId) {
+        errors.push(`معرف الصنف مفقود للبند "${it.itemName}"`);
+        break;
+      }
       if (!it.batch || !it.batch.trim()) {
         errors.push(`رقم الدفعة مطلوب للبند "${it.itemName}"`);
         break;
@@ -317,12 +344,12 @@ function PurchaseReceiptForm({ onSuccess, onCancel }) {
     setIsSubmitting(true);
 
     const payload = {
-      supplier,
+      supplierId: supplier,
       warehouse,
       supplierInvoiceNumber: supplierInvoiceNumber.trim() || undefined,
       receiptDate: new Date(receiptDate).toISOString(),
       items: items.map((i) => ({
-        item: i.item.id,
+        itemId: i.itemId,                          // ✅ مباشرة — مضمون
         batch: i.batch.trim().toUpperCase(),
         productionDate: i.productionDate || undefined,
         expiry: new Date(i.expiry).toISOString(),
@@ -330,7 +357,7 @@ function PurchaseReceiptForm({ onSuccess, onCancel }) {
         unit: i.unit || '',
         unitCost: i.unitCost,
         unitPrice: i.unitPrice || 0,
-        total: i.total,
+        total: Math.round(i.quantity * i.unitCost * 100) / 100,
         location: '',
       })),
       subtotal,
@@ -339,25 +366,24 @@ function PurchaseReceiptForm({ onSuccess, onCancel }) {
       taxAmount,
       total,
       paymentType,
-      initialPayment:
-        paidAmount > 0
-          ? {
-              amount: paidAmount,
-              method: initialMethod,
-              checkId: initialMethod === 'check' ? checkId.trim() : undefined,
-            }
-          : undefined,
+      initialPayment: paidAmount,
+      initialPaymentMethod: paymentType === 'cash' ? 'cash' : initialMethod,
       paidAmount,
       remainingAmount,
       dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
       notes: notes || undefined,
     };
 
-    try {
+       try {
+      console.log('🔍 payload BEFORE send:', JSON.stringify(payload, null, 2));
       const created = await purchaseReceiptsAPI.createPurchaseReceipt(payload);
       toast.success('تم إنشاء إيصال الاستلام (مسودة). أكّده لإدخال البضاعة للمخزون.');
       onSuccess?.(created);
     } catch (err) {
+      console.error('🔍 error full:', err);
+      console.error('🔍 error.error:', err?.error);
+      console.error('🔍 error.details:', err?.error?.details);
+
       toast.error(err?.error?.message || err?.message || 'فشل إنشاء الإيصال.');
     } finally {
       setIsSubmitting(false);
@@ -418,22 +444,22 @@ function PurchaseReceiptForm({ onSuccess, onCancel }) {
       {/* ═══ 2. البنود ═══ */}
       <Section title="البنود" icon={Package} description={`${items.length} بند`}>
         {/* البحث */}
-        <div className="relative mb-3">
+        <div className="relative mb-3" ref={searchContainerRef}>
           <Input
             placeholder="ابحث بالاسم التجاري/العلمي/الباركود..."
             icon={Search}
             value={itemSearch}
             onChange={(e) => setItemSearch(e.target.value)}
-            onFocus={() => itemResults.length > 0 && setShowItemResults(true)}
+            onFocus={() => setShowItemResults(true)}
           />
           {searchingItems && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-neutral-200 rounded-md shadow-lg p-3 text-center text-sm text-neutral-500">
+            <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-neutral-200 rounded-md shadow-lg p-3 text-center text-sm text-neutral-500 z-20">
               <Loader2 size={16} className="inline animate-spin mr-2" />
               جاري البحث...
             </div>
           )}
           {showItemResults && itemResults.length > 0 && !searchingItems && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-neutral-200 rounded-md shadow-lg max-h-64 overflow-y-auto z-10">
+            <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-neutral-200 rounded-md shadow-lg max-h-64 overflow-y-auto z-20">
               {itemResults.map((item) => (
                 <button
                   key={item.id}
@@ -441,17 +467,23 @@ function PurchaseReceiptForm({ onSuccess, onCancel }) {
                   onClick={() => handlePickItem(item)}
                   className="w-full text-right px-4 py-2 hover:bg-primary-50 border-b border-neutral-100 last:border-b-0 transition-colors"
                 >
-                  <p className="font-medium text-neutral-900">{item.tradeName}</p>
+                  <p className="font-medium text-neutral-900">{item.tradeName || item.name}</p>
                   <p className="text-xs text-neutral-500">
-                    {item.scientificName} · {item.category}
+                    {item.scientificName} {item.category ? `· ${item.category}` : ''}
                   </p>
                 </button>
               ))}
             </div>
           )}
+          {showItemResults && !searchingItems && itemResults.length === 0 && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-neutral-200 rounded-md shadow-lg p-3 text-center text-sm text-neutral-500 z-20">
+              <AlertCircle size={16} className="inline mr-1 text-warning-600" />
+              {debouncedItemSearch ? 'لا توجد أصناف مطابقة' : 'لا توجد أصناف نشطة'}
+            </div>
+          )}
         </div>
 
-        {/* الجدول */}
+        {/* الجدول — ✅ F7: تحسين المظهر */}
         {items.length === 0 ? (
           <div className="border-2 border-dashed border-neutral-300 rounded-lg p-12 text-center bg-neutral-50">
             <Package size={48} className="mx-auto text-neutral-400 mb-3" />
@@ -460,111 +492,117 @@ function PurchaseReceiptForm({ onSuccess, onCancel }) {
             </p>
           </div>
         ) : (
-          <div className="border border-neutral-200 rounded-lg overflow-hidden">
+          <div className="border border-neutral-200 rounded-lg overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-neutral-50 border-b border-neutral-200">
+                <thead className="bg-gradient-to-b from-neutral-50 to-neutral-100 border-b-2 border-neutral-300">
                   <tr>
-                    <th className="px-2 py-2 text-right font-bold min-w-[160px]">الصنف</th>
-                    <th className="px-2 py-2 text-center font-bold w-24">الدفعة *</th>
-                    <th className="px-2 py-2 text-center font-bold w-28">الإنتاج</th>
-                    <th className="px-2 py-2 text-center font-bold w-28">الصلاحية *</th>
-                    <th className="px-2 py-2 text-center font-bold w-20">الكمية *</th>
-                    <th className="px-2 py-2 text-center font-bold w-20">الوحدة</th>
-                    <th className="px-2 py-2 text-center font-bold w-24">التكلفة *</th>
-                    <th className="px-2 py-2 text-center font-bold w-24">سعر البيع</th>
-                    <th className="px-2 py-2 text-left font-bold w-24">الإجمالي</th>
-                    <th className="px-2 py-2 w-10" />
+                    <th className="px-3 py-2.5 text-right font-bold text-neutral-700 min-w-[180px]">الصنف</th>
+                    <th className="px-3 py-2.5 text-center font-bold text-neutral-700 w-32">رقم الدفعة *</th>
+                    <th className="px-3 py-2.5 text-center font-bold text-neutral-700 w-36">تاريخ الإنتاج</th>
+                    <th className="px-3 py-2.5 text-center font-bold text-neutral-700 w-36">تاريخ الصلاحية *</th>
+                    <th className="px-3 py-2.5 text-center font-bold text-neutral-700 w-24">الكمية *</th>
+                    <th className="px-3 py-2.5 text-center font-bold text-neutral-700 w-24">الوحدة</th>
+                    <th className="px-3 py-2.5 text-center font-bold text-neutral-700 w-28">التكلفة *</th>
+                    <th className="px-3 py-2.5 text-center font-bold text-neutral-700 w-28">سعر البيع</th>
+                    <th className="px-3 py-2.5 text-left font-bold text-neutral-700 w-32">الإجمالي</th>
+                    <th className="px-3 py-2.5 w-12" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-100">
                   {items.map((it, idx) => (
-                    <tr key={idx} className="hover:bg-neutral-50/50">
-                      <td className="px-2 py-2">
-                        <p className="font-medium text-neutral-900">{it.itemName}</p>
+                    <tr key={idx} className="hover:bg-primary-50/30 transition-colors">
+                      <td className="px-3 py-2">
+                        <div>
+                          <p className="font-medium text-neutral-900 text-sm">{it.itemName}</p>
+                          {it.item?.scientificName && (
+                            <p className="text-xs text-neutral-500 mt-0.5">{it.item.scientificName}</p>
+                          )}
+                        </div>
                       </td>
-                      <td className="px-2 py-2">
+                      <td className="px-3 py-2">
                         <input
                           type="text"
                           value={it.batch}
                           onChange={(e) => updateItemField(idx, 'batch', e.target.value.toUpperCase())}
                           placeholder="B-001"
-                          className="w-full px-1.5 py-1 text-center rounded border border-neutral-300 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary-200"
+                          className="w-full px-2.5 py-1.5 text-center rounded-md border border-neutral-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-300 focus:border-primary-500"
                           maxLength={50}
                         />
                       </td>
-                      <td className="px-2 py-2">
+                      <td className="px-3 py-2">
                         <input
                           type="date"
                           value={it.productionDate}
                           onChange={(e) => updateItemField(idx, 'productionDate', e.target.value)}
-                          className="w-full px-1.5 py-1 rounded border border-neutral-300 text-xs focus:outline-none focus:ring-2 focus:ring-primary-200"
+                          className="w-full px-2.5 py-1.5 rounded-md border border-neutral-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300 focus:border-primary-500"
                         />
                       </td>
-                      <td className="px-2 py-2">
+                      <td className="px-3 py-2">
                         <input
                           type="date"
                           value={it.expiry}
                           onChange={(e) => updateItemField(idx, 'expiry', e.target.value)}
-                          className="w-full px-1.5 py-1 rounded border border-neutral-300 text-xs focus:outline-none focus:ring-2 focus:ring-primary-200"
+                          className="w-full px-2.5 py-1.5 rounded-md border border-neutral-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300 focus:border-primary-500"
                         />
                       </td>
-                      <td className="px-2 py-2">
+                      <td className="px-3 py-2">
                         <input
                           type="number"
                           value={it.quantity}
                           onChange={(e) => updateItemField(idx, 'quantity', e.target.value)}
                           min="0.01"
                           step="any"
-                          className="w-full px-1.5 py-1 text-center rounded border border-neutral-300 text-xs numeric focus:outline-none focus:ring-2 focus:ring-primary-200"
+                          className="w-full px-2.5 py-1.5 text-center rounded-md border border-neutral-300 text-sm numeric focus:outline-none focus:ring-2 focus:ring-primary-300 focus:border-primary-500"
                         />
                       </td>
-                      <td className="px-2 py-2 text-center text-xs text-neutral-600">
+                      <td className="px-3 py-2 text-center text-sm text-neutral-700">
                         {it.unit || '—'}
                       </td>
-                      <td className="px-2 py-2">
+                      <td className="px-3 py-2">
                         <input
                           type="number"
                           value={it.unitCost}
                           onChange={(e) => updateItemField(idx, 'unitCost', e.target.value)}
                           min="0"
                           step="any"
-                          className="w-full px-1.5 py-1 text-left rounded border border-neutral-300 text-xs numeric focus:outline-none focus:ring-2 focus:ring-primary-200"
+                          className="w-full px-2.5 py-1.5 text-left rounded-md border border-neutral-300 text-sm numeric focus:outline-none focus:ring-2 focus:ring-primary-300 focus:border-primary-500"
                         />
                       </td>
-                      <td className="px-2 py-2">
+                      <td className="px-3 py-2">
                         <input
                           type="number"
                           value={it.unitPrice}
                           onChange={(e) => updateItemField(idx, 'unitPrice', e.target.value)}
                           min="0"
                           step="any"
-                          className="w-full px-1.5 py-1 text-left rounded border border-neutral-300 text-xs numeric focus:outline-none focus:ring-2 focus:ring-primary-200"
+                          className="w-full px-2.5 py-1.5 text-left rounded-md border border-neutral-300 text-sm numeric focus:outline-none focus:ring-2 focus:ring-primary-300 focus:border-primary-500"
                         />
                       </td>
-                      <td className="px-2 py-2 text-left numeric font-bold text-neutral-900">
+                      <td className="px-3 py-2 text-left numeric font-bold text-neutral-900 text-sm">
                         {formatCurrency(it.total || 0, false)}
                       </td>
-                      <td className="px-2 py-2 text-center">
+                      <td className="px-3 py-2 text-center">
                         <button
                           type="button"
                           onClick={() => removeItem(idx)}
-                          className="p-1 rounded text-danger-600 hover:bg-danger-50 transition-colors"
+                          className="p-1.5 rounded-md text-danger-600 hover:bg-danger-50 transition-colors"
                           aria-label="حذف البند"
+                          title="حذف البند"
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={16} />
                         </button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
-                <tfoot className="bg-neutral-50 border-t-2 border-neutral-300">
+                <tfoot className="bg-gradient-to-b from-neutral-50 to-neutral-100 border-t-2 border-neutral-300">
                   <tr>
-                    <td colSpan={8} className="px-2 py-2 text-sm text-neutral-600 text-left">
-                      إجمالي البنود: <strong className="numeric">{items.length}</strong>
+                    <td colSpan={8} className="px-3 py-3 text-sm text-neutral-700 text-left font-medium">
+                      إجمالي البنود: <strong className="numeric text-neutral-900">{items.length}</strong>
                     </td>
-                    <td className="px-2 py-2 text-left">
-                      <span className="text-lg font-bold numeric text-primary-800">
+                    <td className="px-3 py-3 text-left">
+                      <span className="text-xl font-bold numeric text-primary-800">
                         {formatCurrency(subtotal)}
                       </span>
                     </td>

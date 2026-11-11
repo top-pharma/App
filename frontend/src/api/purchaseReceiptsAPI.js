@@ -2,13 +2,14 @@
  * @file purchaseReceiptsAPI.js
  * @description دوال API الخاصة بإيصالات استلام البضاعة من الموردين (المشتريات).
  *
- * لماذا هذا الملف؟
- * - يفصل منطق الاتصال بالخادم عن المكونات.
- * - يُوحّد شكل الاستدعاءات مع بقية ملفات API.
- * - يدعم دورة حياة الإيصال (مسودة ← مؤكد/ملغى).
+ * ⚠️ إصلاح 2026-11-10:
+ *  - `listPurchaseReceipts` تستخدم `normalizeListWithId` (مثل باقي APIs).
+ *  - تُرجع `{ items, pagination }` بدل `data.data` (مصفوفة).
+ *  - `getPurchaseReceipt` / `createPurchaseReceipt` / إلخ — تستخدم `withId` (لإضافة `id`).
  */
 
 import axiosInstance from './axiosInstance.js';
+import { normalizeListWithId, withId } from './_helpers.js';
 
 // ═══════════════════════════════════════════════
 // 1. القراءة (Read)
@@ -22,7 +23,7 @@ import axiosInstance from './axiosInstance.js';
  */
 export async function listPurchaseReceipts(params = {}) {
   const { data } = await axiosInstance.get('/purchase-receipts', { params });
-  return data.data;
+  return normalizeListWithId(data);
 }
 
 /**
@@ -33,7 +34,7 @@ export async function listPurchaseReceipts(params = {}) {
  */
 export async function getPurchaseReceipt(id) {
   const { data } = await axiosInstance.get(`/purchase-receipts/${id}`);
-  return data.data;
+  return withId(data.data);
 }
 
 // ═══════════════════════════════════════════════
@@ -48,7 +49,7 @@ export async function getPurchaseReceipt(id) {
  */
 export async function createPurchaseReceipt(payload) {
   const { data } = await axiosInstance.post('/purchase-receipts', payload);
-  return data.data;
+  return withId(data.data);
 }
 
 /**
@@ -60,7 +61,7 @@ export async function createPurchaseReceipt(payload) {
  */
 export async function updatePurchaseReceipt(id, payload) {
   const { data } = await axiosInstance.patch(`/purchase-receipts/${id}`, payload);
-  return data.data;
+  return withId(data.data);
 }
 
 // ═══════════════════════════════════════════════
@@ -69,7 +70,6 @@ export async function updatePurchaseReceipt(id, payload) {
 
 /**
  * تأكيد الاستلام (draft ← received).
- * يُدخل البضاعة للمخزون ويُنشئ حركة نقدية للدفعة الأولى (إن وُجدت).
  * @async
  * @param {string} id
  * @param {Object} payload - { receivedAt?, notes? }
@@ -77,7 +77,7 @@ export async function updatePurchaseReceipt(id, payload) {
  */
 export async function confirmPurchaseReceipt(id, payload) {
   const { data } = await axiosInstance.post(`/purchase-receipts/${id}/confirm`, payload);
-  return data.data;
+  return withId(data.data);
 }
 
 /**
@@ -89,7 +89,7 @@ export async function confirmPurchaseReceipt(id, payload) {
  */
 export async function cancelPurchaseReceipt(id, payload) {
   const { data } = await axiosInstance.post(`/purchase-receipts/${id}/cancel`, payload);
-  return data.data;
+  return withId(data.data);
 }
 
 // ═══════════════════════════════════════════════

@@ -12,6 +12,7 @@ import {
   ArrowRight,
   Pencil,
   Plus,
+  Power,
   Search,
   Shield,
   Tag,
@@ -70,6 +71,7 @@ function CategoriesPage() {
     createCategory,
     updateCategory,
     deleteCategory,
+    reactivateCategory,
   } = useCategories();
 
   // ✅ فلاتر
@@ -172,6 +174,18 @@ function CategoriesPage() {
   };
 
   // ═══════════════════════════════════════════════
+  // إعادة تفعيل تصنيف معطّل
+  // ═══════════════════════════════════════════════
+  const handleReactivate = async (category) => {
+    const result = await reactivateCategory(category.id);
+    if (result.success) {
+      toast.success(`تم إعادة تفعيل "${category.label}".`);
+    } else {
+      toast.error(result.error);
+    }
+  };
+
+  // ═══════════════════════════════════════════════
   // 7. الأعمدة
   // ═══════════════════════════════════════════════
   const columns = [
@@ -223,11 +237,10 @@ function CategoriesPage() {
       align: 'center',
       render: (row) => (
         <span
-          className={`inline-block text-xs font-medium px-2 py-1 rounded-full ${
-            row.isActive
+          className={`inline-block text-xs font-medium px-2 py-1 rounded-full ${row.isActive
               ? 'bg-success-50 text-success-700'
               : 'bg-neutral-100 text-neutral-500'
-          }`}
+            }`}
         >
           {row.isActive ? 'نشط' : 'معطّل'}
         </span>
@@ -242,36 +255,48 @@ function CategoriesPage() {
       ),
     },
     {
-      key: 'actions',
-      label: 'إجراءات',
-      align: 'center',
-      width: '120px',
-      render: (row) => (
-        <div className="flex items-center justify-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={Pencil}
-            onClick={() => openEditForm(row)}
-            title="تعديل"
-          >
-            {''}
-          </Button>
-          {isAdmin && !row.isSystem && row.isActive && (
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={Trash2}
-              onClick={() => setConfirmDelete(row)}
-              title="تعطيل"
-              className="text-danger-600 hover:bg-danger-50"
-            >
-              {''}
-            </Button>
-          )}
-        </div>
-      ),
-    },
+  key: 'actions',
+  label: 'إجراءات',
+  align: 'center',
+  width: '120px',
+  render: (row) => (
+    <div className="flex items-center justify-center gap-1">
+      <Button
+        variant="ghost"
+        size="sm"
+        icon={Pencil}
+        onClick={() => openEditForm(row)}
+        title="تعديل"
+      >
+        {''}
+      </Button>
+      {isAdmin && !row.isSystem && row.isActive && (
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={Trash2}
+          onClick={() => setConfirmDelete(row)}
+          title="تعطيل"
+          className="text-danger-600 hover:bg-danger-50"
+        >
+          {''}
+        </Button>
+      )}
+      {isAdmin && !row.isSystem && !row.isActive && (        // ← ✅ جديد
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={Power}
+          onClick={() => handleReactivate(row)}
+          title="إعادة تفعيل"
+          className="text-success-600 hover:bg-success-50"
+        >
+          {''}
+        </Button>
+      )}
+    </div>
+  ),
+},
   ];
 
   // ═══════════════════════════════════════════════
@@ -412,11 +437,10 @@ function CategoriesPage() {
             <textarea
               rows={2}
               placeholder="وصف مختصر للتصنيف..."
-              className={`w-full px-3 py-2 rounded-md border transition-colors focus:outline-none focus:ring-2 focus:ring-offset-0 text-sm ${
-                errors.description
+              className={`w-full px-3 py-2 rounded-md border transition-colors focus:outline-none focus:ring-2 focus:ring-offset-0 text-sm ${errors.description
                   ? 'border-danger-500 focus:border-danger-500 focus:ring-danger-200'
                   : 'border-neutral-300 focus:border-primary-500 focus:ring-primary-200'
-              }`}
+                }`}
               {...register('description')}
             />
             {errors.description && (

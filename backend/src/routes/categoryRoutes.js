@@ -19,6 +19,7 @@ import {
   createCategory,
   updateCategory,
   deleteCategory,
+  reactivateCategory,
 } from '../controllers/categoryController.js';
 import { requireAuth } from '../middlewares/authMiddleware.js';
 import { requirePermissions } from '../middlewares/rbacMiddleware.js';
@@ -105,6 +106,21 @@ router.delete(
     description: 'تعطيل تصنيف',
   }),
   deleteCategory
+);
+
+// ────────────────────────────────────────────────────────────
+// PATCH /api/categories/:id/reactivate
+// ────────────────────────────────────────────────────────────
+router.patch(
+  '/:id/reactivate',
+  requirePermissions('categories.delete'),    // ← نفس صلاحية التعطيل
+  validateParams(categoryIdParamsSchema),
+  auditAction({
+    action: AUDIT_ACTIONS.UPDATE,
+    resource: 'Category',
+    description: 'إعادة تفعيل تصنيف',
+  }),
+  reactivateCategory
 );
 
 export default router;

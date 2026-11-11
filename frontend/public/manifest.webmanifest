@@ -1,0 +1,50 @@
+{
+  "name": "شركة توب فارمة التجارية لتوزيع الأدوية — Pharma System",
+  "short_name": "Pharma",
+  "description": "نظام إدارة صيدليات وشركات أدوية متكامل — شركة توب فارمة التجارية لتوزيع الأدوية",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#ffffff",
+  "theme_color": "#1e40af",
+  "lang": "ar",
+  "dir": "rtl",
+  "categories": ["business", "medical", "productivity"],
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "الفواتير",
+      "short_name": "فواتير",
+      "description": "إدارة فواتير المبيعات",
+      "url": "/sales/invoices",
+      "icons": [{ "src": "/logo.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "الأصناف",
+      "short_name": "أصناف",
+      "description": "إدارة الأصناف الدوائية",
+      "url": "/inventory/items",
+      "icons": [{ "src": "/logo.png", "sizes": "192x192" }]
+    }
+  ]
+}

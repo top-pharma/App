@@ -373,6 +373,57 @@ export const deleteCategory = asyncHandler(async (req, res) => {
 });
 
 // ============================================================
+// 5) إعادة التفعيل (Reactivate)
+// ============================================================
+
+/**
+ * PATCH /api/categories/:id/reactivate
+ * - يُعيد تفعيل تصنيف معطّل (isActive=true).
+ * - لا يعمل على التصنيفات النشطة (إرجاع 400).
+ * - لا يعمل على التصنيفات النظامية (لأنها دائماً نشطة).
+ *
+ * @type {import('express').RequestHandler}
+ */
+export const reactivateCategory = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const category = await Category.findById(id);
+
+  if (!category) {
+    throw new AppError('التصنيف غير موجود.', 404, 'CATEGORY_NOT_FOUND');
+  }
+
+  if (category.isActive) {
+    throw new AppError(
+      'التصنيف نشط بالفعل.',
+      400,
+      'CATEGORY_ALREADY_ACTIVE'
+    );
+  }
+
+  category.isActive = true;
+  await category.save();
+
+  await logAuditEvent({
+    req,
+    action: AUDIT_ACTIONS.UPDATE,
+    resource: 'Category',
+    resourceId: category._id,
+    description: `إعادة تفعيل تصنيف: ${category.label}`,
+    success: true,
+    meta: {
+      before: { isActive: false },
+      after: { isActive: true },
+    },
+  });
+
+  return res.status(200).json({
+    success: true,
+    data: buildCategoryPayload(category),
+  });
+});
+
+// ============================================================
 // تصدير موحّد
 // ============================================================
 
@@ -382,5 +433,6 @@ export default {
   createCategory,
   updateCategory,
   deleteCategory,
+  reactivateCategory,
   ensureSystemCategories,
 };

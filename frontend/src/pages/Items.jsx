@@ -1,6 +1,12 @@
 /**
  * @file ItemsPage.jsx
  * @description صفحة إدارة الأصناف — قائمة + بحث + إنشاء + تعديل + تعطيل.
+ *
+ * ✅ (2026-11-10):
+ * - إصلاح: ItemForm داخل Modal (بدل عرضه متراكباً مع الصفحة).
+ * - تصحيح props: onSuccess/onCancel (بدل onSubmit/onClose).
+ * - handleFormSuccess — إغلاق Modal + إعادة تحميل القائمة.
+ * - إضافة Modal إلى imports.
  */
 
 import { useEffect, useState } from 'react';
@@ -13,6 +19,7 @@ import ItemForm from '../components/Inventory/ItemForm.jsx';
 import Button from '../components/UI/Button.jsx';
 import Card from '../components/UI/Card.jsx';
 import ConfirmDialog from '../components/UI/ConfirmDialog.jsx';
+import Modal from '../components/UI/Modal.jsx';
 import Pagination from '../components/UI/Pagination.jsx';
 import Table from '../components/UI/Table.jsx';
 import { useAuth } from '../hooks/useAuth.js';
@@ -28,7 +35,7 @@ function ItemsPage() {
   const { categories } = useCategories();
   const {
     items, pagination, loading, error,
-    fetchItems, createItem, updateItem, deleteItem, reactivateItem, resetError,
+    fetchItems, deleteItem, reactivateItem, resetError,
   } = useItems();
 
   const [search, setSearch] = useState('');
@@ -44,16 +51,26 @@ function ItemsPage() {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => {
+  // ═══════════════════════════════════════════════
+  // 1. تحميل القائمة
+  // ═══════════════════════════════════════════════
+  const loadItems = () => {
     const params = { page, limit };
     if (search) params.search = search;
     if (filterCategory) params.category = filterCategory;
     if (filterActive !== 'all') params.isActive = filterActive === 'active';
     if (filterLowStock) params.lowStock = true;
     fetchItems(params);
+  };
+
+  useEffect(() => {
+    loadItems();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, limit, search, filterCategory, filterActive, filterLowStock]);
 
+  // ═══════════════════════════════════════════════
+  // 2. فتح/إغلاق النموذج
+  // ═══════════════════════════════════════════════
   const openCreateForm = () => {
     setEditingItem(null);
     setIsFormOpen(true);
@@ -69,19 +86,18 @@ function ItemsPage() {
     setEditingItem(null);
   };
 
-  const handleFormSubmit = async ({ values, isEdit }) => {
-    const result = isEdit
-      ? await updateItem(editingItem.id, values)
-      : await createItem(values);
-
-    if (result.success) {
-      toast.success(isEdit ? 'تم تعديل الصنف بنجاح.' : 'تم إنشاء الصنف بنجاح.');
-      return { success: true };
-    }
-    toast.error(result.error);
-    return { success: false, error: result.error };
+  // ═══════════════════════════════════════════════
+  // 3. نجاح الحفظ (إنشاء/تعديل)
+  // ═══════════════════════════════════════════════
+  const handleFormSuccess = () => {
+    closeForm();
+    toast.success(editingItem ? 'تم تعديل الصنف بنجاح.' : 'تم إنشاء الصنف بنجاح.');
+    loadItems();
   };
 
+  // ═══════════════════════════════════════════════
+  // 4. تعطيل الصنف
+  // ═══════════════════════════════════════════════
   const handleDelete = async () => {
     if (!confirmDelete) return;
     setDeleting(true);
@@ -95,8 +111,8 @@ function ItemsPage() {
     }
   };
 
-    // ═══════════════════════════════════════════════
-  // إعادة تفعيل صنف معطّل
+  // ═══════════════════════════════════════════════
+  // 5. إعادة تفعيل صنف معطّل
   // ═══════════════════════════════════════════════
   const handleReactivate = async (item) => {
     const result = await reactivateItem(item.id);
@@ -106,10 +122,17 @@ function ItemsPage() {
       toast.error(result.error);
     }
   };
+
+  // ═══════════════════════════════════════════════
+  // 6. خريطة التصنيفات
+  // ═══════════════════════════════════════════════
   const categoryLabels = Object.fromEntries(
     categories.map((c) => [c.name, c.label])
   );
 
+  // ═══════════════════════════════════════════════
+  // 7. أعمدة الجدول
+  // ═══════════════════════════════════════════════
   const columns = [
     {
       key: 'tradeName',
@@ -181,7 +204,7 @@ function ItemsPage() {
           {isAdmin && row.isActive && (
             <Button variant="ghost" size="sm" icon={Trash2} onClick={() => setConfirmDelete(row)} title="تعطيل" className="text-danger-600 hover:bg-danger-50">{''}</Button>
           )}
-                    {isAdmin && !row.isActive && (
+          {isAdmin && !row.isActive && (
             <Button
               variant="ghost"
               size="sm"
@@ -198,8 +221,12 @@ function ItemsPage() {
     },
   ];
 
+  // ═══════════════════════════════════════════════
+  // 8. Render
+  // ═══════════════════════════════════════════════
   return (
     <div className="space-y-6">
+      {/* الترويسة */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
           <Link to="/inventory" className="p-2 rounded-md text-neutral-500 hover:bg-neutral-100 transition-colors" title="رجوع">
@@ -213,6 +240,7 @@ function ItemsPage() {
         <Button icon={Plus} onClick={openCreateForm}>صنف جديد</Button>
       </div>
 
+      {/* الفلاتر */}
       <Card noPadding>
         <div className="p-4 space-y-3">
           <div className="flex flex-col sm:flex-row gap-3">
@@ -257,6 +285,7 @@ function ItemsPage() {
         </div>
       </Card>
 
+      {/* الجدول */}
       <Card noPadding>
         <div className="p-4">
           <Table
@@ -280,8 +309,22 @@ function ItemsPage() {
         </div>
       </Card>
 
-      <ItemForm isOpen={isFormOpen} onClose={closeForm} item={editingItem} onSubmit={handleFormSubmit} />
+      {/* ✅ Modal: إنشاء/تعديل الصنف */}
+      <Modal
+        isOpen={isFormOpen}
+        onClose={closeForm}
+        title={editingItem ? 'تعديل الصنف' : 'إنشاء صنف جديد'}
+        size="full"
+        closeOnOverlay={false}
+      >
+        <ItemForm
+          item={editingItem}
+          onSuccess={handleFormSuccess}
+          onCancel={closeForm}
+        />
+      </Modal>
 
+      {/* تأكيد التعطيل */}
       <ConfirmDialog
         isOpen={Boolean(confirmDelete)}
         onClose={() => setConfirmDelete(null)}

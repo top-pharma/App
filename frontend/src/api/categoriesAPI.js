@@ -82,10 +82,26 @@ export async function deleteCategory(id) {
   return data.data;
 }
 
+// ═══════════════════════════════════════════════
+// 5. إعادة التفعيل
+// ═══════════════════════════════════════════════
+
+/**
+ * إعادة تفعيل تصنيف معطّل.
+ * @async
+ * @param {string} id
+ * @returns {Promise<Object>}
+ */
+export async function reactivateCategory(id) {
+  const { data } = await axiosInstance.patch(`/categories/${id}/reactivate`);
+  return data.data;
+}
+
 export default {
   listCategories,
   getCategory,
   createCategory,
   updateCategory,
   deleteCategory,
+  reactivateCategory, 
 };

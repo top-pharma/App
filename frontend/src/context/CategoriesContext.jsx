@@ -106,6 +106,27 @@ export function CategoriesProvider({ children }) {
     }
   }, []);
 
+  const reactivateCategory = useCallback(async (id) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const reactivated = await categoriesAPI.reactivateCategory(id);
+      setCategories((prev) =>
+        prev.map((cat) =>
+          cat.id === id ? { ...cat, isActive: true } : cat
+        )
+      );
+      return { success: true, data: reactivated };
+    } catch (err) {
+      const message =
+        err?.error?.message || err?.message || 'فشل إعادة تفعيل التصنيف.';
+      setError(message);
+      return { success: false, error: message };
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   const value = useMemo(
     () => ({
       categories,
@@ -116,6 +137,7 @@ export function CategoriesProvider({ children }) {
       createCategory,
       updateCategory,
       deleteCategory,
+      reactivateCategory,
       resetError: () => setError(null),
     }),
     [

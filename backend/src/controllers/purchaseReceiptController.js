@@ -3,13 +3,19 @@
  * @description
  * إيصالات استلام المشتريات — مسودة → تأكيد → (إلغاء).
  *
- * لماذا هذا الملف؟
- * - Phase 2: draft → received (فقط).
- * - Phase 3: عند confirm → Stock + CashTransaction + AccountingEntry + Supplier.balance.
- *
  * دورة الحياة:
  *  draft → (confirm) → received
  *        → (cancel)  → cancelled
+ *
+ * ⚠️ إصلاح 2026-11-10:
+ *  - F1: `populate('supplier')` بدل `supplierId` — Model الحقل اسمه `supplier`.
+ *  - F2: `populate('items.item')` بدل `items.itemId` — Model البند اسمه `item`.
+ *  - F3: `create` يستخدم `supplier` + `discount` + `item` (أسماء Model).
+ *  - F4: دعم `supplierId`/`supplier` + `itemId`/`item` من الـ payload.
+ *  - F5: دعم `initialPayment` كائن أو رقم.
+ *  - F6: `confirm` يقرأ `receipt.initialPayment.amount` (كائن).
+ *  - F7: `confirm` يقرأ `receipt.items[].item` (لا itemId).
+ *  - F8: `update` يستخدم `discount` (لا discountAmount) + `items[].item`.
  *
  * ملاحظة:
  * - لا يمكن تعديل إلا draft.
@@ -80,6 +86,45 @@ const generateReceiptNumber = async () => {
   return `${prefix}${String(sequence).padStart(6, '0')}`;
 };
 
+/**
+ * يطبّع بنداً من الـ payload إلى شكل Model.
+ * يدعم `itemId` أو `item`.
+ */
+const normalizeItem = (it) => ({
+  item: it.itemId || it.item,                         // ✅ Model: item (لا itemId)
+  batch: (it.batch || '').trim().toUpperCase(),
+  productionDate: it.productionDate || null,
+  expiry: it.expiry,
+  quantity: Number(it.quantity),
+  unit: it.unit || '',
+  unitCost: Number(it.unitCost),
+  unitPrice: Number(it.unitPrice || 0),
+  total:
+    Number(it.total) ||
+    Math.round(Number(it.quantity) * Number(it.unitCost) * 100) / 100,
+  location: it.location || '',
+});
+
+/**
+ * يطبّع initialPayment (كائن أو رقم) إلى { amount, method }.
+ */
+const normalizeInitialPayment = (initialPayment, initialPaymentMethod) => {
+  if (initialPayment && typeof initialPayment === 'object') {
+    return {
+      amount: Number(initialPayment.amount) || 0,
+      // ⚠️ Model يقبل cash/bank فقط — نحوّل check → cash
+      method: initialPayment.method === 'check' ? 'cash' : (initialPayment.method || 'cash'),
+    };
+  }
+  return {
+    amount: Number(initialPayment) || 0,
+    method:
+      initialPaymentMethod === 'check'
+        ? 'cash'
+        : initialPaymentMethod || 'cash',
+  };
+};
+
 /* ─────────────────────────────────────────────────────────────
  * GET /api/purchase-receipts
  * ───────────────────────────────────────────────────────────── */
@@ -90,32 +135,49 @@ export const listPurchaseReceipts = async (req, res, next) => {
       limit = 20,
       status,
       supplierId,
+      supplier: supplierQuery,
       warehouse,
+      paymentType,
       from,
       to,
+      dateFrom,
+      dateTo,
       search,
+      sortBy = 'receiptDate',
+      sortOrder = 'desc',
     } = req.query;
 
     const filter = {};
     if (status && status !== 'all') filter.status = status;
-    if (supplierId) filter.supplierId = supplierId;
+    if (supplierId || supplierQuery) filter.supplier = supplierId || supplierQuery;   // ✅ Model: supplier
     if (warehouse) filter.warehouse = warehouse;
-    if (from || to) {
+    if (paymentType) filter.paymentType = paymentType;
+
+    const fromDate = from || dateFrom;
+    const toDate = to || dateTo;
+    if (fromDate || toDate) {
       filter.createdAt = {};
-      if (from) filter.createdAt.$gte = new Date(from);
-      if (to) filter.createdAt.$lte = new Date(to);
+      if (fromDate) filter.createdAt.$gte = new Date(fromDate);
+      if (toDate) filter.createdAt.$lte = new Date(toDate);
     }
     if (search) {
-      filter.receiptNumber = { $regex: search, $options: 'i' };
+      filter.$or = [
+        { receiptNumber: { $regex: search, $options: 'i' } },
+        { supplierInvoiceNumber: { $regex: search, $options: 'i' } },
+      ];
     }
 
     const skip = (Number(page) - 1) * Number(limit);
+
+    const sort = {};
+    sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
     const [receipts, total] = await Promise.all([
       PurchaseReceipt.find(filter)
-        .populate('supplierId', 'name phone code')
+        .populate('supplier', 'name phone code')        // ✅ supplier (لا supplierId)
         .populate('warehouse', 'name code')
         .populate('createdBy', 'fullName')
-        .sort({ createdAt: -1 })
+        .sort(sort)
         .skip(skip)
         .limit(Number(limit))
         .lean(),
@@ -143,9 +205,9 @@ export const listPurchaseReceipts = async (req, res, next) => {
 export const getPurchaseReceipt = async (req, res, next) => {
   try {
     const receipt = await PurchaseReceipt.findById(req.params.id)
-      .populate('supplierId', 'name phone code address')
+      .populate('supplier', 'name phone code address')    // ✅ supplier
       .populate('warehouse', 'name code')
-      .populate('items.itemId', 'name code units')
+      .populate('items.item', 'tradeName scientificName units barcode')  // ✅ item
       .populate('createdBy', 'fullName')
       .populate('confirmedBy', 'fullName')
       .populate('cancelledBy', 'fullName');
@@ -168,23 +230,31 @@ export const createPurchaseReceipt = async (req, res, next) => {
   try {
     const {
       supplierId,
+      supplier: supplierAlt,                // ✅ دعم الاسم البديل
       warehouse,
+      supplierInvoiceNumber,
+      receiptDate,
       items,
       discount = 0,
       taxRate = 0,
       notes,
-      initialPayment = 0,
-      initialPaymentMethod = 'cash',
+      paymentType = 'cash',
+      initialPayment,
+      initialPaymentMethod,
+      dueDate,
     } = req.body;
 
-    if (!supplierId) throw new AppError('المورد مطلوب', 400, 'MISSING_SUPPLIER');
+    // ✅ دعم الاسمين
+    const supplierRef = supplierId || supplierAlt;
+
+    if (!supplierRef) throw new AppError('المورد مطلوب', 400, 'MISSING_SUPPLIER');
     if (!warehouse) throw new AppError('المخزن مطلوب', 400, 'MISSING_WAREHOUSE');
     if (!Array.isArray(items) || items.length === 0) {
       throw new AppError('الإيصال يحتاج بنداً واحداً على الأقل', 400, 'EMPTY_ITEMS');
     }
 
-    const supplier = await Supplier.findById(supplierId);
-    if (!supplier) throw new AppError('المورد غير موجود', 404, 'SUPPLIER_NOT_FOUND');
+    const supplierDoc = await Supplier.findById(supplierRef);
+    if (!supplierDoc) throw new AppError('المورد غير موجود', 404, 'SUPPLIER_NOT_FOUND');
 
     const { subtotal, discountAmount, taxAmount, total } = calculateTotals(
       items,
@@ -192,29 +262,40 @@ export const createPurchaseReceipt = async (req, res, next) => {
       taxRate
     );
 
+    // ✅ تطبيع initialPayment
+    const { amount: paymentAmount, method: paymentMethod } =
+      normalizeInitialPayment(initialPayment, initialPaymentMethod);
+
     const receiptNumber = await generateReceiptNumber();
+
+    // ✅ تطبيع البنود
+    const normalizedItems = items.map(normalizeItem);
 
     const receipt = await PurchaseReceipt.create({
       receiptNumber,
-      supplierId,
+      supplier: supplierRef,                           // ✅ Model: supplier
       warehouse,
-      items: items.map((it) => ({
-        itemId: it.itemId,
-        batch: it.batch,
-        expiry: it.expiry,
-        quantity: Number(it.quantity),
-        unitCost: Number(it.unitCost),
-        unitPrice: Number(it.unitPrice || 0),
-      })),
+      supplierInvoiceNumber: supplierInvoiceNumber || '',
+      receiptDate: receiptDate ? new Date(receiptDate) : new Date(),
+      items: normalizedItems,
       subtotal,
-      discountAmount,
+      discount: discountAmount,                        // ✅ Model: discount
       taxRate: Number(taxRate) || 0,
       taxAmount,
       total,
-      initialPayment: Number(initialPayment) || 0,
-      initialPaymentMethod,
+      paymentType,
+      // ✅ Model يتوقع كائن { amount, method, paidAt, paidBy }
+      initialPayment: {
+        amount: paymentAmount,
+        method: paymentMethod,
+        paidAt: null,
+        paidBy: null,
+      },
+      paidAmount: paymentAmount,
+      remainingAmount: round2(total - paymentAmount),
+      dueDate: dueDate ? new Date(dueDate) : null,
       status: 'draft',
-      notes,
+      notes: notes || '',
       createdBy: req.user._id,
     });
 
@@ -249,31 +330,31 @@ export const updatePurchaseReceipt = async (req, res, next) => {
       throw new AppError('الإيصال غير موجود', 404, 'RECEIPT_NOT_FOUND');
     }
     if (receipt.status !== 'draft') {
-      throw new AppError(
-        'يمكن تعديل المسودات فقط',
-        400,
-        'NOT_A_DRAFT'
-      );
+      throw new AppError('يمكن تعديل المسودات فقط', 400, 'NOT_A_DRAFT');
     }
 
     const before = receipt.toObject();
 
     const {
       supplierId,
+      supplier: supplierAlt,
       warehouse,
       items,
       discount,
       taxRate,
       notes,
+      paymentType,
       initialPayment,
       initialPaymentMethod,
+      dueDate,
     } = req.body;
 
     // ─── 1) تغيير المورد (إن طُلب) ───
-    if (supplierId && String(supplierId) !== String(receipt.supplierId)) {
-      const supplier = await Supplier.findById(supplierId);
-      if (!supplier) throw new AppError('المورد غير موجود', 404, 'SUPPLIER_NOT_FOUND');
-      receipt.supplierId = supplierId;
+    const supplierRef = supplierId || supplierAlt;
+    if (supplierRef && String(supplierRef) !== String(receipt.supplier)) {
+      const supplierDoc = await Supplier.findById(supplierRef);
+      if (!supplierDoc) throw new AppError('المورد غير موجود', 404, 'SUPPLIER_NOT_FOUND');
+      receipt.supplier = supplierRef;                  // ✅ Model: supplier
     }
 
     // ─── 2) تغيير المخزن ───
@@ -285,7 +366,7 @@ export const updatePurchaseReceipt = async (req, res, next) => {
         throw new AppError('الإيصال يحتاج بنداً واحداً على الأقل', 400, 'EMPTY_ITEMS');
       }
 
-      const newDiscount = discount !== undefined ? discount : receipt.discountAmount;
+      const newDiscount = discount !== undefined ? discount : receipt.discount;
       const newTaxRate = taxRate !== undefined ? taxRate : receipt.taxRate;
 
       const { subtotal, discountAmount, taxAmount, total } = calculateTotals(
@@ -294,47 +375,52 @@ export const updatePurchaseReceipt = async (req, res, next) => {
         newTaxRate
       );
 
-      receipt.items = items.map((it) => ({
-        itemId: it.itemId,
-        batch: it.batch,
-        expiry: it.expiry,
-        quantity: Number(it.quantity),
-        unitCost: Number(it.unitCost),
-        unitPrice: Number(it.unitPrice || 0),
-      }));
+      receipt.items = items.map(normalizeItem);        // ✅ item
       receipt.subtotal = subtotal;
-      receipt.discountAmount = discountAmount;
+      receipt.discount = discountAmount;               // ✅ Model: discount
       receipt.taxRate = Number(newTaxRate) || 0;
       receipt.taxAmount = taxAmount;
       receipt.total = total;
-    } else {
+    } else if (discount !== undefined || taxRate !== undefined) {
       // تحديث الخصم/الضريبة فقط (بدون تغيير البنود)
-      if (discount !== undefined || taxRate !== undefined) {
-        const newDiscount = discount !== undefined ? discount : receipt.discountAmount;
-        const newTaxRate = taxRate !== undefined ? taxRate : receipt.taxRate;
+      const newDiscount = discount !== undefined ? discount : receipt.discount;
+      const newTaxRate = taxRate !== undefined ? taxRate : receipt.taxRate;
 
-        const { subtotal, discountAmount, taxAmount, total } = calculateTotals(
-          receipt.items,
-          newDiscount,
-          newTaxRate
-        );
-        receipt.subtotal = subtotal;
-        receipt.discountAmount = discountAmount;
-        receipt.taxRate = Number(newTaxRate) || 0;
-        receipt.taxAmount = taxAmount;
-        receipt.total = total;
-      }
+      const { subtotal, discountAmount, taxAmount, total } = calculateTotals(
+        receipt.items,
+        newDiscount,
+        newTaxRate
+      );
+      receipt.subtotal = subtotal;
+      receipt.discount = discountAmount;               // ✅ Model: discount
+      receipt.taxRate = Number(newTaxRate) || 0;
+      receipt.taxAmount = taxAmount;
+      receipt.total = total;
     }
 
     // ─── 4) تحديث الدفعة الأولى ───
-    if (initialPayment !== undefined) {
-      receipt.initialPayment = Number(initialPayment) || 0;
-    }
-    if (initialPaymentMethod) {
-      receipt.initialPaymentMethod = initialPaymentMethod;
+    if (initialPayment !== undefined || initialPaymentMethod !== undefined) {
+      const { amount, method } = normalizeInitialPayment(
+        initialPayment,
+        initialPaymentMethod
+      );
+      receipt.initialPayment = {
+        amount,
+        method,
+        paidAt: null,
+        paidBy: null,
+      };
+      receipt.paidAmount = amount;
+      receipt.remainingAmount = round2(receipt.total - amount);
     }
 
-    // ─── 5) ملاحظات ───
+    // ─── 5) نوع الدفع + dueDate ───
+    if (paymentType) receipt.paymentType = paymentType;
+    if (dueDate !== undefined) {
+      receipt.dueDate = dueDate ? new Date(dueDate) : null;
+    }
+
+    // ─── 6) ملاحظات ───
     if (notes !== undefined) receipt.notes = notes;
 
     await receipt.save();
@@ -361,7 +447,7 @@ export const updatePurchaseReceipt = async (req, res, next) => {
 
 /* ─────────────────────────────────────────────────────────────
  * POST /api/purchase-receipts/:id/confirm
- * تأكيد الإيصال — Phase 3: Stock + CashTransaction + PURCHASE entry.
+ * تأكيد الإيصال — Stock + CashTransaction + PURCHASE entry.
  * ───────────────────────────────────────────────────────────── */
 export const confirmPurchaseReceipt = async (req, res, next) => {
   try {
@@ -370,7 +456,7 @@ export const confirmPurchaseReceipt = async (req, res, next) => {
       initialPaymentMethod,
       cashFundId,
       bankAccountId,
-    } = req.body;
+    } = req.body || {};
 
     const receipt = await PurchaseReceipt.findById(req.params.id);
     if (!receipt) {
@@ -380,12 +466,20 @@ export const confirmPurchaseReceipt = async (req, res, next) => {
       throw new AppError('يمكن تأكيد المسودات فقط', 409, 'INVALID_STATUS');
     }
 
-    const paidAmount = round2(
-      initialPayment !== undefined ? initialPayment : receipt.initialPayment || 0
-    );
+    // ✅ Model: initialPayment = { amount, method }
+    // إذا مُرِّر من الـ body → نستخدمه، وإلا نأخذ من المسودة
+    let paidAmount;
+    let method;
+    if (initialPayment !== undefined) {
+      const norm = normalizeInitialPayment(initialPayment, initialPaymentMethod);
+      paidAmount = norm.amount;
+      method = norm.method;
+    } else {
+      paidAmount = round2(Number(receipt.initialPayment?.amount) || 0);
+      method = receipt.initialPayment?.method || 'cash';
+    }
+
     const remainingAmount = round2(receipt.total - paidAmount);
-    const method =
-      initialPaymentMethod || receipt.initialPaymentMethod || 'cash';
 
     if (paidAmount > 0 && method === 'cash' && !cashFundId) {
       throw new AppError('الصندوق مطلوب للدفع النقدي', 400, 'MISSING_CASH_FUND');
@@ -398,7 +492,7 @@ export const confirmPurchaseReceipt = async (req, res, next) => {
     try {
       await returnStock({
         issuedLots: receipt.items.map((it) => ({
-          itemId: it.itemId,
+          itemId: it.item,                        // ✅ Model: item
           warehouseId: receipt.warehouse,
           batch: it.batch,
           expiry: it.expiry,
@@ -437,7 +531,7 @@ export const confirmPurchaseReceipt = async (req, res, next) => {
     // ─── 3) تحديث Supplier.currentBalance (إن متبقٍ) ───
     if (remainingAmount > 0) {
       await Supplier.updateOne(
-        { _id: receipt.supplierId },
+        { _id: receipt.supplier },
         { $inc: { currentBalance: remainingAmount } }
       );
     }
@@ -492,7 +586,7 @@ export const confirmPurchaseReceipt = async (req, res, next) => {
       // Rollback Supplier
       if (remainingAmount > 0) {
         await Supplier.updateOne(
-          { _id: receipt.supplierId },
+          { _id: receipt.supplier },
           { $inc: { currentBalance: -remainingAmount } }
         );
       }
@@ -501,10 +595,16 @@ export const confirmPurchaseReceipt = async (req, res, next) => {
 
     // ─── 5) تحديث الحالة ───
     receipt.status = 'received';
-    receipt.confirmedBy = req.user._id;
-    receipt.confirmedAt = new Date();
-    receipt.initialPayment = paidAmount;
-    receipt.initialPaymentMethod = method;
+    receipt.receivedAt = new Date();
+    receipt.receivedBy = req.user._id;
+    receipt.initialPayment = {
+      amount: paidAmount,
+      method,
+      paidAt: paidAmount > 0 ? new Date() : null,
+      paidBy: paidAmount > 0 ? req.user._id : null,
+    };
+    receipt.paidAmount = paidAmount;
+    receipt.remainingAmount = remainingAmount;
     await receipt.save();
 
     await logAuditEvent({

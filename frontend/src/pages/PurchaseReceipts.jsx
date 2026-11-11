@@ -3,21 +3,17 @@
  * @description
  * صفحة إدارة إيصالات استلام المشتريات من الموردين.
  *
- * لماذا هذا الملف؟
- * - إدارة دخول البضاعة للمخزون من الشركات المستوردة.
- * - "تأكيد الاستلام" يُدخل البضاعة لـ Stock + يُحدّث رصيد المورد.
- * - "إلغاء" مسموح فقط للمسودات (draft).
- * - يدعم البحث، الفلترة، والإنشاء عبر Modal.
+ * ⚠️ إصلاح 2026-11-10:
+ *  - إزالة `useNavigate` + `Eye` (غير مستخدمين).
+ *  - `row.supplier?.name` يعمل بعد إصلاح `populate('supplier')` في Controller.
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   Plus,
   Receipt,
   Search,
   X,
-  Eye,
   AlertCircle,
   CheckCircle2,
   Clock,
@@ -38,9 +34,7 @@ import Modal from '../components/UI/Modal.jsx';
 import PurchaseReceiptForm from '../components/Sales/PurchaseReceiptForm.jsx';
 
 import { formatCurrency, formatDate, formatNumber } from '../utils/formatters.js';
-import {
-  PAYMENT_TYPE_LABELS_AR,
-} from '../utils/constants.js';
+import { PAYMENT_TYPE_LABELS_AR } from '../utils/constants.js';
 
 // ═══════════════════════════════════════════════
 // 1. المكونات المساعدة
@@ -84,7 +78,6 @@ function MiniStat({ label, value, color = 'primary' }) {
 function PurchaseReceiptsPage() {
   const { isAdmin, isStorekeeper } = useAuth();
   const toast = useToast();
-  const navigate = useNavigate();
 
   // ─── الحالة ───
   const [receipts, setReceipts] = useState([]);
@@ -478,7 +471,7 @@ function PurchaseReceiptsPage() {
               </div>
               <div className="flex justify-between">
                 <span>المورّد:</span>
-                <span className="font-medium">{confirmTarget.supplier?.name}</span>
+                <span className="font-medium">{confirmTarget.supplier?.name || '—'}</span>
               </div>
               <div className="flex justify-between">
                 <span>الإجمالي:</span>

@@ -2,27 +2,14 @@
  * FinancePage.jsx
  *
  * الصفحة الرئيسية لقسم المالية (Hub).
- * تعرض بطاقات تنقّل لكل صفحة مالية + إحصائيات سريعة.
  *
- * ✅ 🅲 (2026-11-08):
- * - حُذف useChecksContext.
- * - حُذف pendingChecksCount.
- * - حُذفت بطاقة "الشيكات".
- * - حُذف قسم التنبيهات (upcoming + overdue).
- * - حُذف FileText من imports (كان للشيكات فقط).
- *
- * ⚠️ إصلاح 2026-11-11 (F1):
- * - استخدام `currentBalance` بدل `balance` (virtual لا يعمل مع .lean()).
- * - `funds` + `activeAccount` من Context — `.lean()` — لا virtuals.
+ * ✅ 🅲 (2026-11-08): حذف الشيكات.
+ * ✅ F1 (2026-11-11): استخدام currentBalance بدل balance.
+ * ✅ v9.9 (2026-11-12): حذف " SDG" اليدوي — formatCurrency يُضيفها.
  */
 
 import { Link } from 'react-router-dom';
-import {
-  Wallet,
-  Building2,
-  Receipt,
-  TrendingUp,
-} from 'lucide-react';
+import { Wallet, Building2, Receipt, TrendingUp } from 'lucide-react';
 import { useCashFundsContext } from '../context/CashFundsContext.jsx';
 import { useBankAccountsContext } from '../context/BankAccountsContext.jsx';
 import Card from '../components/UI/Card.jsx';
@@ -32,12 +19,12 @@ const FinancePage = () => {
   const { funds } = useCashFundsContext();
   const { activeAccount } = useBankAccountsContext();
 
-  // ✅ F1: استخدام currentBalance (لا balance — virtual لا يعمل مع .lean())
   const totalCashBalance = funds.reduce(
     (sum, f) => sum + (Number(f.currentBalance) || Number(f.balance) || 0),
     0
   );
-  const bankBalance = Number(activeAccount?.currentBalance) || Number(activeAccount?.balance) || 0;
+  const bankBalance =
+    Number(activeAccount?.currentBalance) || Number(activeAccount?.balance) || 0;
 
   const cards = [
     {
@@ -46,7 +33,7 @@ const FinancePage = () => {
       icon: Wallet,
       color: 'bg-blue-500',
       path: '/finance/cash-funds',
-      stat: `${formatCurrency(totalCashBalance)} SDG`,
+      stat: formatCurrency(totalCashBalance),           // ✅ بدون " SDG"
       statLabel: `${funds.length} صندوق`,
     },
     {
@@ -55,7 +42,7 @@ const FinancePage = () => {
       icon: Building2,
       color: 'bg-green-500',
       path: '/finance/bank-accounts',
-      stat: activeAccount ? `${formatCurrency(bankBalance)} SDG` : 'لا يوجد',
+      stat: activeAccount ? formatCurrency(bankBalance) : 'لا يوجد',  // ✅ بدون " SDG"
       statLabel: activeAccount ? 'رصيد البنك' : 'حساب',
     },
     {
@@ -85,7 +72,6 @@ const FinancePage = () => {
         <p className="text-gray-600 mt-1">إدارة الصناديق والبنك والقيود</p>
       </div>
 
-      {/* بطاقات التنقل */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {cards.map((card) => {
           const Icon = card.icon;
@@ -106,7 +92,9 @@ const FinancePage = () => {
                   </div>
                 )}
               </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-1">{card.title}</h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-1">
+                {card.title}
+              </h3>
               <p className="text-sm text-gray-600">{card.description}</p>
             </Link>
           );

@@ -64,6 +64,7 @@ import backupRoutes from './routes/backupRoutes.js';
 
 // ─── Routes — Settings (Phase D) ───
 import settingsRoutes from './routes/settingsRoutes.js';
+import auditLogRoutes from './routes/auditLogRoutes.js';
 
 const app = express();
 
@@ -149,6 +150,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/backup', backupRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/audit-logs', auditLogRoutes);
 
 /* ═════════════════════════════════════════════════════════════
  * 8) 404 + Error handlers

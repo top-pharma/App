@@ -10,6 +10,12 @@
  * - bankAccountsAPI.getBankAccounts الآن يعيد { items, pagination }.
  * - fetchAccounts يقرأ result.items (وليس result.data).
  * - fallback: result.data (للتوافق مع أي API قديم).
+ *
+ * ⚠️ إصلاح 2026-11-12:
+ * - F1: حذف نظام تفعيل/تعطيل نهائياً.
+ *       - activeAccount = accounts[0] (دائماً — لا isActive).
+ *       - deleteAccount = حذف فعلي (بدل soft delete).
+ *       - الرسائل: "حذف" بدل "تعطيل".
  */
 
 import { createContext, useState, useEffect, useCallback, useMemo, useContext } from 'react';
@@ -30,7 +36,7 @@ export const BankAccountsProvider = ({ children }) => {
 
   /**
    * جلب الحسابات البنكية.
-   * ⚠️ Phase A.8: result = { items, pagination } (من normalizeListWithId).
+   * ✅ F1: activeAccount = accounts[0] (دائماً — لا isActive).
    */
   const fetchAccounts = useCallback(
     async (params = {}) => {
@@ -38,14 +44,13 @@ export const BankAccountsProvider = ({ children }) => {
       setError(null);
       try {
         const result = await bankAccountsAPI.getBankAccounts({ limit: 100, ...params });
-        // ⚠️ Phase A.8: result.items (مع fallback لـ result.data)
         const list =
           (Array.isArray(result?.items) ? result.items : null) ||
           (Array.isArray(result?.data) ? result.data : null) ||
           [];
         setAccounts(list);
-        const active = list.find((a) => a.isActive);
-        setActiveAccount(active || null);
+        // ✅ F1: أول حساب (دائماً) — لا حاجة لـ isActive
+        setActiveAccount(list[0] || null);
       } catch (err) {
         const msg =
           err?.error?.message ||
@@ -106,18 +111,19 @@ export const BankAccountsProvider = ({ children }) => {
     [fetchAccounts, success, showError]
   );
 
+  // ✅ F1: deleteAccount = حذف فعلي
   const deleteAccount = useCallback(
     async (id) => {
       try {
         await bankAccountsAPI.deleteBankAccount(id);
         await fetchAccounts();
-        success('تم تعطيل الحساب البنكي');
+        success('تم حذف الحساب البنكي');
       } catch (err) {
         const msg =
           err?.error?.message ||
           err?.response?.data?.error?.message ||
           err?.message ||
-          'فشل تعطيل الحساب البنكي';
+          'فشل حذف الحساب البنكي';
         showError(msg);
         throw err;
       }

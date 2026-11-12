@@ -1,9 +1,13 @@
 /**
  * bankAccountController.js
  *
- * إدارة الحساب البنكي (BankAccount).
- * ملاحظة: النظام يدعم حساباً بنكياً واحداً فقط (متطلب).
- * لذلك أي إنشاء جديد يُعطّل الحساب السابق تلقائياً.
+ * إدارة الحساب البنكي — مبسّط (بدون isActive / isDefault).
+ *
+ * ⚠️ إصلاح 2026-11-12:
+ * - حذف isActive نهائياً.
+ * - createBankAccount: لا updateMany — لا isActive.
+ * - updateBankAccount: لا isActive.
+ * - deleteBankAccount: حذف فعلي (بدل soft delete).
  */
 
 import BankAccount from '../models/BankAccount.js';
@@ -18,30 +22,32 @@ import logger from '../utils/logger.js';
  * ───────────────────────────────────────────────────────────── */
 export const listBankAccounts = async (req, res, next) => {
   try {
-    const { page, limit, search, isActive } = req.query;
+    const { page = 1, limit = 20, search } = req.query;
 
     const filter = {};
     if (search) {
       filter.$or = [
         { bankName: { $regex: search, $options: 'i' } },
         { accountNumber: { $regex: search, $options: 'i' } },
-        { accountName: { $regex: search, $options: 'i' } },
+        { name: { $regex: search, $options: 'i' } },
       ];
     }
-    if (isActive !== 'all') {
-      filter.isActive = isActive === 'true';
-    }
 
-    const skip = (page - 1) * limit;
+    const skip = (Number(page) - 1) * Number(limit);
     const [accounts, total] = await Promise.all([
-      BankAccount.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      BankAccount.find(filter).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)).lean(),
       BankAccount.countDocuments(filter),
     ]);
 
     res.status(200).json({
       success: true,
       data: accounts,
-      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total,
+        totalPages: Math.ceil(total / Number(limit)),
+      },
     });
   } catch (error) {
     next(error);
@@ -65,15 +71,12 @@ export const getBankAccount = async (req, res, next) => {
 
 /* ─────────────────────────────────────────────────────────────
  * GET /api/bank-accounts/active
- * يُرجع الحساب البنكي النشط (للاستخدام في CashSelector)
+ * يُرجع أول حساب بنكي (لأنه واحد فقط).
  * ───────────────────────────────────────────────────────────── */
 export const getActiveBankAccount = async (req, res, next) => {
   try {
-    const account = await BankAccount.findOne({ isActive: true }).lean();
-    if (!account) {
-      return res.status(200).json({ success: true, data: null });
-    }
-    res.status(200).json({ success: true, data: account });
+    const account = await BankAccount.findOne().sort({ createdAt: 1 }).lean();
+    res.status(200).json({ success: true, data: account || null });
   } catch (error) {
     next(error);
   }
@@ -81,7 +84,7 @@ export const getActiveBankAccount = async (req, res, next) => {
 
 /* ─────────────────────────────────────────────────────────────
  * POST /api/bank-accounts
- * إنشاء حساب بنكي (يُعطّل السابق تلقائياً)
+ * إنشاء حساب بنكي (حساب واحد فقط — إذا موجود، نرفض).
  * ───────────────────────────────────────────────────────────── */
 export const createBankAccount = async (req, res, next) => {
   try {
@@ -97,16 +100,11 @@ export const createBankAccount = async (req, res, next) => {
       );
     }
 
-    // 2) تعطيل الحسابات السابقة (حساب واحد فقط)
-    await BankAccount.updateMany(
-      { isActive: true },
-      { $set: { isActive: false } }
-    );
+    // 2) إنشاء الحساب (بدون isActive / isDefault)
+    const { isActive, isDefault, ...payload } = req.body;
+    const account = await BankAccount.create(payload);
 
-    // 3) إنشاء الحساب
-    const account = await BankAccount.create({ ...req.body, isActive: true });
-
-    // 4) قيد افتتاحي إذا كان الرصيد > 0
+    // 3) قيد افتتاحي إذا كان الرصيد > 0
     if (account.openingBalance > 0) {
       try {
         await accountingService.createEntry({
@@ -150,7 +148,7 @@ export const createBankAccount = async (req, res, next) => {
 
     res.status(201).json({
       success: true,
-      message: 'تم إنشاء الحساب البنكي (تم تعطيل الحساب السابق إن وُجد)',
+      message: 'تم إنشاء الحساب البنكي',
       data: account,
     });
   } catch (error) {
@@ -160,6 +158,7 @@ export const createBankAccount = async (req, res, next) => {
 
 /* ─────────────────────────────────────────────────────────────
  * PATCH /api/bank-accounts/:id
+ * تحديث الحساب (بدون isActive / isDefault).
  * ───────────────────────────────────────────────────────────── */
 export const updateBankAccount = async (req, res, next) => {
   try {
@@ -173,6 +172,9 @@ export const updateBankAccount = async (req, res, next) => {
     // منع تعديل openingBalance
     delete req.body.openingBalance;
     delete req.body.balance;
+    // ✅ حذف isActive / isDefault (لا يوجدان في Model)
+    delete req.body.isActive;
+    delete req.body.isDefault;
 
     // منع تكرار رقم الحساب
     if (req.body.accountNumber && req.body.accountNumber !== account.accountNumber) {
@@ -183,14 +185,6 @@ export const updateBankAccount = async (req, res, next) => {
       if (exists) {
         throw new AppError('رقم الحساب مستخدم مسبقاً', 400, 'DUPLICATE_ACCOUNT_NUMBER');
       }
-    }
-
-    // إذا طُلب isActive = true، نعطّل الباقي
-    if (req.body.isActive === true) {
-      await BankAccount.updateMany(
-        { _id: { $ne: account._id } },
-        { $set: { isActive: false } }
-      );
     }
 
     Object.assign(account, req.body);
@@ -218,7 +212,7 @@ export const updateBankAccount = async (req, res, next) => {
 
 /* ─────────────────────────────────────────────────────────────
  * DELETE /api/bank-accounts/:id
- * Soft delete فقط (لا نحذف حساباً له حركات)
+ * حذف فعلي (بدون soft delete).
  * ───────────────────────────────────────────────────────────── */
 export const deleteBankAccount = async (req, res, next) => {
   try {
@@ -227,23 +221,29 @@ export const deleteBankAccount = async (req, res, next) => {
       throw new AppError('الحساب البنكي غير موجود', 404, 'BANK_ACCOUNT_NOT_FOUND');
     }
 
-    // Soft delete دائماً (لأمان البيانات المالية)
-    account.isActive = false;
-    await account.save();
+    // منع الحذف إذا كان له رصيد
+    if (account.currentBalance > 0) {
+      throw new AppError(
+        `لا يمكن حذف حساب له رصيد (${account.currentBalance} SDG). اسحب الرصيد أولاً.`,
+        400,
+        'CANNOT_DELETE_WITH_BALANCE'
+      );
+    }
+
+    await account.deleteOne();
 
     await logAuditEvent({
       req,
-      action: AUDIT_ACTIONS.UPDATE,
+      action: AUDIT_ACTIONS.DELETE,
       resource: 'BankAccount',
       resourceId: account._id,
-      description: `تعطيل حساب بنكي: ${account.bankName}`,
+      description: `حذف حساب بنكي: ${account.bankName}`,
       success: true,
     });
 
     res.status(200).json({
       success: true,
-      message: 'تم تعطيل الحساب البنكي (يمكن إعادة تفعيله لاحقاً)',
-      data: account,
+      message: 'تم حذف الحساب البنكي',
     });
   } catch (error) {
     next(error);

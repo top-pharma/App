@@ -1,10 +1,14 @@
 /**
  * BankAccountForm.jsx
  *
+ * نموذج إنشاء/تعديل حساب بنكي — مبسّط (بدون isActive).
+ *
  * ⚠️ إصلاح 2026-11-12:
- *  - F1: isActive — true دائماً (بدل initialData.isActive !== false).
- *  - F2: onSubmit — isActive: true (إذا isEdit).
- *  - F3: branch — initialData.branchName || initialData.branch.
+ * - حذف isActive من schema.
+ * - حذف isActive من defaultValues.
+ * - حذف isActive من reset.
+ * - حذف checkbox "نشط".
+ * - handleFormSubmit: بدون isActive.
  */
 
 import { useEffect } from 'react';
@@ -15,6 +19,7 @@ import Modal from '../UI/Modal.jsx';
 import Button from '../UI/Button.jsx';
 import Input from '../UI/Input.jsx';
 
+// ✅ schema — بدون isActive
 const schema = z.object({
   bankName: z.string().trim().min(2, 'اسم البنك مطلوب').max(100),
   accountNumber: z.string().trim().min(5, 'رقم الحساب يجب أن يكون 5 أرقام على الأقل').max(50),
@@ -23,7 +28,6 @@ const schema = z.object({
   iban: z.string().trim().max(34).optional().nullable(),
   swift: z.string().trim().max(11).optional().nullable(),
   openingBalance: z.coerce.number().min(0).default(0),
-  isActive: z.boolean().default(true),
   notes: z.string().trim().max(1000).optional().nullable(),
 });
 
@@ -43,7 +47,6 @@ const BankAccountForm = ({ isOpen, onClose, onSubmit, initialData = null, isEdit
       iban: '',
       swift: '',
       openingBalance: 0,
-      isActive: true,
       notes: '',
     },
   });
@@ -59,8 +62,6 @@ const BankAccountForm = ({ isOpen, onClose, onSubmit, initialData = null, isEdit
           iban: initialData.iban || '',
           swift: initialData.swift || '',
           openingBalance: initialData.openingBalance || 0,
-          // ✅ F1: isActive — true دائماً
-          isActive: true,
           notes: initialData.notes || '',
         });
       } else {
@@ -72,7 +73,6 @@ const BankAccountForm = ({ isOpen, onClose, onSubmit, initialData = null, isEdit
           iban: '',
           swift: '',
           openingBalance: 0,
-          isActive: true,
           notes: '',
         });
       }
@@ -83,8 +83,6 @@ const BankAccountForm = ({ isOpen, onClose, onSubmit, initialData = null, isEdit
     try {
       const payload = { ...data, currency: 'SDG' };
       if (isEdit) delete payload.openingBalance;
-      // ✅ F2: isActive — true دائماً (إذا isEdit)
-      if (isEdit) payload.isActive = true;
       await onSubmit(payload);
       onClose();
     } catch (err) {
@@ -149,10 +147,7 @@ const BankAccountForm = ({ isOpen, onClose, onSubmit, initialData = null, isEdit
           />
         </div>
 
-        <div className="flex items-center gap-2">
-          <input type="checkbox" {...register('isActive')} id="bankIsActive" className="w-4 h-4" />
-          <label htmlFor="bankIsActive" className="text-sm text-gray-700">نشط</label>
-        </div>
+        {/* ✅ حذف checkbox isActive */}
 
         <div className="flex justify-end gap-2 pt-4 border-t">
           <Button type="button" variant="secondary" onClick={onClose} disabled={isSubmitting}>إلغاء</Button>

@@ -1,141 +1,75 @@
 /**
  * @file BankAccount.js
  * @description
- * نموذج الحساب البنكي (متطلب صريح: حساب بنكي واحد فقط).
+ * نموذج الحساب البنكي — مبسّط (بدون isActive / isDefault).
  *
- * لماذا هذا الملف؟
- * - النظام يدعم حساباً بنكياً واحداً فقط.
- * - نُفرض ذلك عبر unique index جزئي على isActive=true.
- * - الرصيد الحالي (currentBalance) يُحدَّث من CashTransaction (نوع bank).
- * - virtuals للتوافق: balance / accountName / branch / description.
+ * ⚠️ إصلاح 2026-11-12:
+ * - حذف isActive نهائياً — الحساب موجود دائماً نشط.
+ * - حذف isDefault — الحساب البنكي واحد فقط (لا حاجة لافتراضي).
+ * - حذف unique index على isActive (كان يسبب E11000 عند التفعيل).
+ * - الحساب البنكي يُنشأ مرة واحدة، ويُعدّل، ويُحذف (فعلياً).
  */
 
 import mongoose from 'mongoose';
 
 const { Schema, model } = mongoose;
 
-/**
- * Schema الحساب البنكي.
- */
 const bankAccountSchema = new Schema(
   {
-    /**
-     * اسم الحساب (مثال: الحساب الرئيسي — بنك الخرطوم).
-     * يُقرأ في الواجهة عبر virtual accountName.
-     */
     name: {
       type: String,
       required: [true, 'اسم الحساب مطلوب.'],
       trim: true,
       maxlength: [150, 'الاسم طويل جداً.'],
     },
-
-    /**
-     * اسم البنك.
-     */
     bankName: {
       type: String,
       required: [true, 'اسم البنك مطلوب.'],
       trim: true,
       maxlength: [150, 'اسم البنك طويل جداً.'],
     },
-
-    /**
-     * رقم الحساب.
-     */
     accountNumber: {
       type: String,
       required: [true, 'رقم الحساب مطلوب.'],
       trim: true,
       maxlength: [50, 'رقم الحساب طويل جداً.'],
     },
-
-    /**
-     * رقم الآيبان (اختياري).
-     */
     iban: {
       type: String,
       trim: true,
       uppercase: true,
       default: '',
     },
-
-    /**
-     * اسم الفرع.
-     * يُقرأ في الواجهة عبر virtual branch.
-     */
     branchName: {
       type: String,
       trim: true,
       default: '',
     },
-
-    /**
-     * SWIFT (اختياري).
-     */
     swift: {
       type: String,
       trim: true,
       uppercase: true,
       default: '',
     },
-
-    /**
-     * العملة (SDG فقط).
-     */
     currency: {
       type: String,
       default: 'SDG',
       enum: ['SDG'],
     },
-
-    /**
-     * الرصيد الحالي — الحقل الفعلي في قاعدة البيانات.
-     * يُحدَّث عبر $inc: { currentBalance: delta } في cashService.
-     */
     currentBalance: {
       type: Number,
       default: 0,
     },
-
-    /**
-     * الرصيد الافتتاحي.
-     */
     openingBalance: {
       type: Number,
       default: 0,
     },
-
-    /**
-     * هل هو الحساب النشط الوحيد؟
-     * النظام يدعم حساباً واحداً نشطاً فقط.
-     */
-    isActive: {
-      type: Boolean,
-      default: true,
-    },
-
-    /**
-     * هل هو الحساب الافتراضي؟
-     */
-    isDefault: {
-      type: Boolean,
-      default: true,
-    },
-
-    /**
-     * ملاحظات.
-     */
     notes: {
       type: String,
       trim: true,
       default: '',
       maxlength: [500, 'الملاحظات طويلة جداً.'],
     },
-
-    /**
-     * من أنشأ الحساب؟
-     */
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: 'User',
@@ -151,7 +85,6 @@ const bankAccountSchema = new Schema(
 /* ─────────────────────────────────────────────────────────────
  * Virtuals — توافق مع الكود القديم
  * ───────────────────────────────────────────────────────────── */
-
 bankAccountSchema
   .virtual('balance')
   .get(function getBalance() {
@@ -188,7 +121,11 @@ bankAccountSchema
     this.notes = v || '';
   });
 
-// تفعيل virtuals
+// ✅ virtuals — isActive: true دائماً (للتوافق مع الكود القديم)
+bankAccountSchema.virtual('isActive').get(function getIsActive() {
+  return true;
+});
+
 bankAccountSchema.set('toJSON', { virtuals: true });
 bankAccountSchema.set('toObject', { virtuals: true });
 
@@ -196,22 +133,11 @@ bankAccountSchema.set('toObject', { virtuals: true });
  * الفهارس
  * ───────────────────────────────────────────────────────────── */
 
-/**
- * فرض حساب بنكي نشط واحد فقط (متطلب صريح).
- */
-bankAccountSchema.index(
-  { isActive: 1 },
-  {
-    unique: true,
-    partialFilterExpression: { isActive: true },
-    name: 'unique_active_bank_account',
-  }
-);
-
-/**
- * منع تكرار رقم الحساب.
- */
+// منع تكرار رقم الحساب
 bankAccountSchema.index({ accountNumber: 1 }, { unique: true });
+
+// ⚠️ لا unique index على isActive — تم حذفه
+// ⚠️ لا index على isDefault — تم حذفه
 
 export const BankAccount = model('BankAccount', bankAccountSchema);
 

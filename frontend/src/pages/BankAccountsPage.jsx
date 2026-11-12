@@ -5,12 +5,17 @@
  *
  * ⚠️ إصلاح 2026-11-12:
  *  - F1-F9: (سابقاً)
- *  - F10: handleSubmit — isActive: true دائماً عند التعديل
- *         (لأن BankAccountForm قد يُرسل isActive: false — يمنع تعطيل الحساب).
+ *  - F11: حذف نظام تفعيل/تعطيل نهائياً.
+ *         - حذف reactivatingAccount + handleReactivate + زر "تفعيل".
+ *         - حذف deactivatingAccount + handleDeactivate + زر "تعطيل".
+ *         - حذف عمود "الحالة" (isActive).
+ *         - حذف تنبيه "لا يوجد حساب نشط".
+ *         - activeAccount = accounts[0] (دائماً).
+ *         - handleSubmit: بدون isActive (BankAccountForm لا يُرسله).
  */
 
 import { useState, useEffect } from 'react';
-import { Plus, Edit, Power, PowerOff, RefreshCw } from 'lucide-react';
+import { Plus, Edit, Trash2, RefreshCw } from 'lucide-react';
 import { useBankAccountsContext } from '../context/BankAccountsContext.jsx';
 import { useToast } from '../hooks/useToast.js';
 import Button from '../components/UI/Button.jsx';
@@ -23,7 +28,6 @@ import { formatCurrency, formatDate } from '../utils/formatters.js';
 const BankAccountsPage = () => {
   const {
     accounts,
-    activeAccount,
     loading,
     fetchAccounts,
     createAccount,
@@ -34,13 +38,15 @@ const BankAccountsPage = () => {
 
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState(null);
-  const [deactivatingAccount, setDeactivatingAccount] = useState(null);
-  const [reactivatingAccount, setReactivatingAccount] = useState(null);
+  const [deletingAccount, setDeletingAccount] = useState(null);
 
   useEffect(() => {
     fetchAccounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ✅ activeAccount = accounts[0] (دائماً — لا isActive)
+  const currentAccount = accounts[0] || null;
 
   const handleCreate = () => {
     setEditingAccount(null);
@@ -52,15 +58,11 @@ const BankAccountsPage = () => {
     setIsFormOpen(true);
   };
 
-  // ✅ F10: handleSubmit — isActive: true دائماً عند التعديل
+  // ✅ handleSubmit — بدون isActive
   const handleSubmit = async (payload) => {
     try {
       if (editingAccount) {
-        // ← هنا: نُضيف isActive: true — يمنع تعطيل الحساب
-        await updateAccount(editingAccount.id || editingAccount._id, {
-          ...payload,
-          isActive: true,
-        });
+        await updateAccount(editingAccount.id || editingAccount._id, payload);
       } else {
         await createAccount(payload);
       }
@@ -71,30 +73,19 @@ const BankAccountsPage = () => {
     }
   };
 
-  const handleDeactivate = async () => {
-    if (!deactivatingAccount) return;
+  // ✅ handleDelete — حذف فعلي
+  const handleDelete = async () => {
+    if (!deletingAccount) return;
     try {
-      await deleteAccount(deactivatingAccount.id || deactivatingAccount._id);
-      setDeactivatingAccount(null);
+      await deleteAccount(deletingAccount.id || deletingAccount._id);
+      success('تم حذف الحساب البنكي');
+      setDeletingAccount(null);
     } catch (err) {
-      showError(err?.error?.message || err?.message || 'فشل التعطيل');
+      showError(err?.error?.message || err?.message || 'فشل الحذف');
     }
   };
 
-  const handleReactivate = async () => {
-    if (!reactivatingAccount) return;
-    try {
-      await updateAccount(reactivatingAccount.id || reactivatingAccount._id, {
-        isActive: true,
-      });
-      success('تم تفعيل الحساب البنكي');
-      setReactivatingAccount(null);
-    } catch (err) {
-      showError(err?.error?.message || err?.message || 'فشل التفعيل');
-    }
-  };
-
-  // ✅ F7: columns بصيغة Table (key/label/render)
+  // ✅ columns — بدون isActive
   const columns = [
     {
       key: 'bankName',
@@ -120,27 +111,11 @@ const BankAccountsPage = () => {
       key: 'currentBalance',
       label: 'الرصيد',
       align: 'end',
-      // ✅ F9: formatCurrency يُضيف "SDG" — لا نُضيفه مرة أخرى
       render: (row) => (
         <span className="font-bold text-green-700">
           {formatCurrency(row.currentBalance || 0)}
         </span>
       ),
-    },
-    {
-      key: 'isActive',
-      label: 'الحالة',
-      align: 'center',
-      render: (row) =>
-        row.isActive ? (
-          <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs rounded-full">
-            نشط
-          </span>
-        ) : (
-          <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">
-            معطّل
-          </span>
-        ),
     },
     {
       key: 'createdAt',
@@ -160,23 +135,13 @@ const BankAccountsPage = () => {
           >
             <Edit size={16} />
           </button>
-          {row.isActive ? (
-            <button
-              onClick={() => setDeactivatingAccount(row)}
-              className="p-1.5 text-red-600 hover:bg-red-50 rounded"
-              title="تعطيل"
-            >
-              <Power size={16} />
-            </button>
-          ) : (
-            <button
-              onClick={() => setReactivatingAccount(row)}
-              className="p-1.5 text-green-600 hover:bg-green-50 rounded"
-              title="تفعيل"
-            >
-              <PowerOff size={16} />
-            </button>
-          )}
+          <button
+            onClick={() => setDeletingAccount(row)}
+            className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+            title="حذف"
+          >
+            <Trash2 size={16} />
+          </button>
         </div>
       ),
     },
@@ -198,7 +163,7 @@ const BankAccountsPage = () => {
           <p className="text-gray-600 text-sm mt-1">
             {accounts.length === 0
               ? 'لا يوجد حساب بنكي بعد'
-              : `${accounts.length} حساب — حساب واحد نشط فقط`}
+              : `${accounts.length} حساب`}
           </p>
         </div>
         <div className="flex gap-2">
@@ -212,28 +177,16 @@ const BankAccountsPage = () => {
         </div>
       </div>
 
-      {activeAccount && (
+      {/* ✅ بطاقة الرصيد — currentAccount = accounts[0] */}
+      {currentAccount && (
         <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl p-6 mb-6">
           <p className="text-sm opacity-90 mb-1">الرصيد الحالي</p>
-          {/* ✅ F9: formatCurrency يُضيف "SDG" — لا نُضيفه مرة أخرى */}
           <p className="text-3xl font-bold">
-            {formatCurrency(activeAccount.currentBalance || 0)}
+            {formatCurrency(currentAccount.currentBalance || 0)}
           </p>
           <p className="text-sm mt-2 opacity-90">
-            {activeAccount.bankName} — {activeAccount.accountNumber}
+            {currentAccount.bankName} — {currentAccount.accountNumber}
           </p>
-        </div>
-      )}
-
-      {accounts.length > 0 && !activeAccount && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4 flex items-start gap-2">
-          <Power size={18} className="text-yellow-700 flex-shrink-0 mt-0.5" />
-          <div className="text-sm text-yellow-800">
-            <p className="font-medium">لا يوجد حساب بنكي نشط</p>
-            <p className="text-xs mt-1">
-              يوجد {accounts.length} حساب معطّل — اضغط "تفعيل" على الحساب المطلوب.
-            </p>
-          </div>
         </div>
       )}
 
@@ -256,24 +209,15 @@ const BankAccountsPage = () => {
         isEdit={!!editingAccount}
       />
 
+      {/* ✅ ConfirmDialog — حذف فقط */}
       <ConfirmDialog
-        isOpen={!!deactivatingAccount}
-        onClose={() => setDeactivatingAccount(null)}
-        onConfirm={handleDeactivate}
-        title="تعطيل الحساب البنكي"
-        message={`هل تريد تعطيل "${deactivatingAccount?.bankName}"؟`}
-        confirmText="تعطيل"
+        isOpen={!!deletingAccount}
+        onClose={() => setDeletingAccount(null)}
+        onConfirm={handleDelete}
+        title="حذف الحساب البنكي"
+        message={`هل تريد حذف "${deletingAccount?.bankName}"؟ لا يمكن التراجع.`}
+        confirmText="حذف"
         variant="danger"
-      />
-
-      <ConfirmDialog
-        isOpen={!!reactivatingAccount}
-        onClose={() => setReactivatingAccount(null)}
-        onConfirm={handleReactivate}
-        title="تفعيل الحساب البنكي"
-        message={`هل تريد تفعيل "${reactivatingAccount?.bankName}"؟`}
-        confirmText="تفعيل"
-        variant="primary"
       />
     </div>
   );

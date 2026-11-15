@@ -177,7 +177,7 @@ const startServer = async () => {
 
     if (env.NODE_ENV !== 'test') {
       startJobs();
-      logger.info('⏰ Jobs started (expiry + reorder + invoiceDue + checkDue)');
+      logger.info('⏰ Jobs started (expiry + reorder + invoiceDue + autoBackup)');
     }
   } catch (error) {
     logger.error(`❌ Failed to start server: ${error.message}`);

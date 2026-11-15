@@ -1,26 +1,11 @@
 /**
  * @file Role.js
  * @description
- * نموذج الدور (Role) — 5 أدوار + 72 صلاحية دقيقة (بعد 🅲).
+ * نموذج الدور (Role) — 6 أدوار + 62 صلاحية دقيقة.
  *
- * ✅ 🅱 (2026-11-08):
- * - حُذفت delivery_notes.* (4 صلاحيات) من ALL_PERMISSIONS.
- * - حُذفت delivery_notes.* من DEFAULT_ROLES:
- *   - accountant: 1 (view)
- *   - sales_rep: 4 (view, create, update, mark_delivered)
- *   - pharmacy: 1 (view)
- *
- * ✅ 🅲 (2026-11-08):
- * - حُذفت finance.checks.manage من ALL_PERMISSIONS.
- * - حُذفت finance.checks.manage من DEFAULT_ROLES.accountant.
- * - Check أُلغي.
- *
- * الصلاحيات المالية (Phase 3):
- *  - finance.view               → عرض الصناديق والبنك والقيود
- *  - finance.manage             → إدارة الصناديق والبنك (CRUD)
- *  - finance.entries.view       → عرض القيود المحاسبية
- *  - finance.entries.manage     → إنشاء قيود يدوية (نادر)
- *  - finance.transactions.view  → عرض الحركات النقدية
+ * ✅ v10.2 (2026-11-13):
+ * - توحيد صلاحية سجل التدقيق: audit_logs.view → audit.view
+ *   (متسق مع auditLogRoutes.js + Sidebar.jsx + AppRoutes.jsx).
  */
 
 import mongoose from 'mongoose';
@@ -28,8 +13,7 @@ import mongoose from 'mongoose';
 const { Schema, model } = mongoose;
 
 /**
- * جميع الصلاحيات المعروفة في النظام (72 صلاحية — بعد 🅲).
- * تُستخدم في pre-save للتحقق من صحة الصلاحيات.
+ * جميع الصلاحيات المعروفة في النظام (62 صلاحية).
  */
 export const ALL_PERMISSIONS = Object.freeze([
   // ─── المستخدمون (5) ───
@@ -59,8 +43,6 @@ export const ALL_PERMISSIONS = Object.freeze([
   // ─── الفواتير (5) ───
   'invoices.view', 'invoices.create', 'invoices.update', 'invoices.cancel', 'invoices.override_price_limit',
 
-  // ⚠️ 🅱: حُذفت delivery_notes.* (4 صلاحيات)
-
   // ─── مرتجعات العملاء (4) ───
   'customer_returns.view', 'customer_returns.create', 'customer_returns.approve', 'customer_returns.reject',
 
@@ -75,16 +57,16 @@ export const ALL_PERMISSIONS = Object.freeze([
   'settings.view', 'settings.update',
 
   // ─── سجل التدقيق (1) ───
-  'audit_logs.view',
+  // ✅ v10.2: audit_logs.view → audit.view
+  'audit.view',
 
   // ─── الإشعارات (2) ───
   'notifications.view', 'notifications.manage',
 
-  // ─── التقارير (2) — Phase 4 ───
+  // ─── التقارير (2) ───
   'reports.view', 'reports.export',
 
-  // ─── المالية (5) — Phase 3 ───
-  // ⚠️ 🅲: حُذف finance.checks.manage
+  // ─── المالية (5) ───
   'finance.view',
   'finance.manage',
   'finance.entries.view',
@@ -97,9 +79,6 @@ export const ALL_PERMISSIONS = Object.freeze([
  */
 const roleSchema = new Schema(
   {
-    /**
-     * كود الدور (admin، accountant، إلخ).
-     */
     code: {
       type: String,
       required: [true, 'كود الدور مطلوب.'],
@@ -108,38 +87,22 @@ const roleSchema = new Schema(
       lowercase: true,
       enum: ['admin', 'storekeeper', 'accountant', 'sales_rep', 'pharmacy', 'hr_manager'],
     },
-
-    /**
-     * اسم الدور (بالعربية).
-     */
     name: {
       type: String,
       required: [true, 'اسم الدور مطلوب.'],
       trim: true,
       maxlength: [100, 'الاسم طويل جداً.'],
     },
-
-    /**
-     * الوصف.
-     */
     description: {
       type: String,
       trim: true,
       default: '',
       maxlength: [500, 'الوصف طويل جداً.'],
     },
-
-    /**
-     * الصلاحيات (list of resource.action).
-     */
     permissions: {
       type: [String],
       default: [],
     },
-
-    /**
-     * هل الدور نظامي (لا يمكن حذفه)؟
-     */
     isSystem: {
       type: Boolean,
       default: true,
@@ -151,9 +114,6 @@ const roleSchema = new Schema(
   }
 );
 
-/**
- * التحقق من أن كل الصلاحيات معروفة.
- */
 roleSchema.pre('save', function validatePermissions(next) {
   const unknown = (this.permissions || []).filter((p) => !ALL_PERMISSIONS.includes(p));
   if (unknown.length > 0) {
@@ -162,31 +122,16 @@ roleSchema.pre('save', function validatePermissions(next) {
   next();
 });
 
-/**
- * هل الدور يملك صلاحية محددة؟
- * @param {string} permission
- * @returns {boolean}
- */
 roleSchema.methods.hasPermission = function hasPermission(permission) {
   if (this.code === 'admin') return true;
   return (this.permissions || []).includes(permission);
 };
 
-/**
- * هل الدور يملك أي من الصلاحيات؟
- * @param {...string} perms
- * @returns {boolean}
- */
 roleSchema.methods.hasAnyPermission = function hasAnyPermission(...perms) {
   if (this.code === 'admin') return true;
   return perms.some((p) => (this.permissions || []).includes(p));
 };
 
-/**
- * هل الدور يملك كل الصلاحيات؟
- * @param {...string} perms
- * @returns {boolean}
- */
 roleSchema.methods.hasAllPermissions = function hasAllPermissions(...perms) {
   if (this.code === 'admin') return true;
   return perms.every((p) => (this.permissions || []).includes(p));
@@ -194,10 +139,6 @@ roleSchema.methods.hasAllPermissions = function hasAllPermissions(...perms) {
 
 /**
  * قائمة الأدوار الافتراضية + صلاحياتها.
- * تُستخدم في seed.js.
- *
- * ✅ 🅱: حُذفت delivery_notes.* من accountant/sales_rep/pharmacy.
- * ✅ 🅲: حُذف finance.checks.manage من accountant.
  */
 export const DEFAULT_ROLES = Object.freeze([
   {
@@ -237,21 +178,18 @@ export const DEFAULT_ROLES = Object.freeze([
       'customers.view', 'customers.update',
       'stocks.view',
       'invoices.view', 'invoices.create', 'invoices.update', 'invoices.cancel', 'invoices.override_price_limit',
-      // ⚠️ 🅱: حُذف delivery_notes.view
       'customer_returns.view', 'customer_returns.approve', 'customer_returns.reject',
       'supplier_returns.view',
       'purchase_receipts.view',
       'settings.view',
-      'audit_logs.view',
+      // ✅ v10.2: audit_logs.view → audit.view
+      'audit.view',
       'notifications.view',
       'reports.view', 'reports.export',
-      // ─── المالية (Phase 3) ───
       'finance.view',
       'finance.manage',
-      // ⚠️ 🅲: حُذف finance.checks.manage
       'finance.entries.view',
       'finance.transactions.view',
-      // ⚠️ بدون finance.entries.manage — القيود تلقائية فقط
     ],
   },
   {
@@ -267,7 +205,8 @@ export const DEFAULT_ROLES = Object.freeze([
       'users.reset_password',
       'roles.view',
       'notifications.view',
-      'audit_logs.view',
+      // ✅ v10.2: audit_logs.view → audit.view
+      'audit.view',
       'settings.view',
     ],
   },
@@ -281,7 +220,6 @@ export const DEFAULT_ROLES = Object.freeze([
       'customers.view',
       'stocks.view',
       'invoices.view', 'invoices.create', 'invoices.update',
-      // ⚠️ 🅱: حُذفت delivery_notes.* (4 صلاحيات)
       'customer_returns.view', 'customer_returns.create',
       'notifications.view',
     ],
@@ -294,7 +232,6 @@ export const DEFAULT_ROLES = Object.freeze([
     permissions: [
       'items.view',
       'invoices.view',
-      // ⚠️ 🅱: حُذف delivery_notes.view
       'customer_returns.view',
       'notifications.view',
     ],

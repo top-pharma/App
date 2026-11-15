@@ -3,23 +3,19 @@
  * @description
  * تسجيل العمليات الحساسة في AuditLog.
  *
- * لماذا هذا الملف؟
- * - متطلب صريح: "تسجيل كل عملية (إنشاء، تعديل، حذف) + محاولات الفشل".
- * - نُوفّر طريقتين:
- *   1) auditAction(): middleware لتسجيل عملية محددة (يُستخدم قبل route).
- *   2) autoAudit(): يلتقط الاستجابة تلقائياً ويسجّل عند statusCode >= 200.
- * - التسجيل لا يُعطّل الطلب أبداً: أي خطأ في الكتابة يُسجَّل ولا يُمرَّر للأعلى.
- * - نخزّن IP + User-Agent + Method + Path لكل حدث.
+ * ✅ v10.2 (2026-11-14):
+ * - writeAudit: sanitize before/after/changes — لا session/client.
+ * - logAuditEvent: sanitize meta — لا session.
+ * - كل المدخلات تُمرَّر عبر JSON.parse(JSON.stringify()) — قبل AuditLog.create.
  */
 
 import { AuditLog, AUDIT_ACTIONS } from '../models/AuditLog.js';
 import { logger } from '../utils/logger.js';
 
-/**
- * استخراج IP الحقيقي للعميل.
- * @param {import('express').Request} req
- * @returns {string}
- */
+/* ─────────────────────────────────────────────────────────────
+ * Helpers
+ * ───────────────────────────────────────────────────────────── */
+
 const getClientIp = (req) => {
   if (!req || !req.headers) return '';
   const forwarded = req.headers['x-forwarded-for'];
@@ -29,11 +25,6 @@ const getClientIp = (req) => {
   return req.ip || req.socket?.remoteAddress || '';
 };
 
-/**
- * استخراج User-Agent.
- * @param {import('express').Request} req
- * @returns {string}
- */
 const getUserAgent = (req) => {
   if (!req || !req.headers) return '';
   const ua = req.headers['user-agent'];
@@ -41,33 +32,56 @@ const getUserAgent = (req) => {
 };
 
 /**
- * كتابة سجل التدقيق (بلا رمي استثناءات).
- *
- * @async
- * @param {Object} payload
- * @returns {Promise<void>}
+ * ✅ v10.2 — sanitize كائن — لا session/client/topology.
+ * يُعيد كائناً آمناً — أو null إذا فشل.
+ */
+const sanitize = (obj) => {
+  if (obj === null || obj === undefined) return null;
+  try {
+    return JSON.parse(JSON.stringify(obj));
+  } catch (err) {
+    logger.warn(`[auditLog] sanitize فشل: ${err.message}`);
+    return null;
+  }
+};
+
+/**
+ * ✅ v10.2 — كتابة سجل التدقيق (sanitized — بلا رمي استثناءات).
  */
 const writeAudit = async (payload) => {
   try {
-    await AuditLog.create(payload);
+    const safePayload = {
+      action: payload.action,
+      actor: payload.actor || null,
+      actorName: payload.actorName || '',
+      actorEmail: payload.actorEmail || '',
+      actorRole: payload.actorRole || '',
+      resource: payload.resource || '',
+      resourceId: payload.resourceId || null,
+      description: payload.description || '',
+      success: Boolean(payload.success),
+      errorCode: payload.errorCode || '',
+      errorMessage: payload.errorMessage || '',
+      before: sanitize(payload.before),
+      after: sanitize(payload.after),
+      changes: sanitize(payload.changes),
+      ip: payload.ip || '',
+      userAgent: payload.userAgent || '',
+      method: payload.method || '',
+      path: payload.path || '',
+      occurredAt: payload.occurredAt || new Date(),
+    };
+
+    await AuditLog.create(safePayload);
   } catch (error) {
     logger.error(`فشل كتابة سجل التدقيق: ${error.message}`);
   }
 };
 
-/**
- * Middleware عام: يسجّل العملية بعد اكتمال الاستجابة تلقائياً.
- *
- * @param {Object} options
- * @param {string} options.action - نوع العملية (AUDIT_ACTIONS).
- * @param {string} options.resource - المورد المتأثر (User, Invoice, ...).
- * @param {string} [options.description] - وصف مختصر.
- * @param {(req: import('express').Request, res: import('express').Response) => string} [options.resourceIdGetter]
- * @param {(req: import('express').Request, res: import('express').Response) => Object} [options.beforeGetter]
- * @param {(req: import('express').Request, res: import('express').Response) => Object} [options.afterGetter]
- * @param {(req: import('express').Request, res: import('express').Response) => Object} [options.changesGetter]
- * @returns {import('express').RequestHandler}
- */
+/* ─────────────────────────────────────────────────────────────
+ * 1) auditAction — middleware لتسجيل عملية محددة
+ * ───────────────────────────────────────────────────────────── */
+
 export const auditAction = (options) => {
   const {
     action,
@@ -82,7 +96,6 @@ export const auditAction = (options) => {
   return (req, res, next) => {
     const start = Date.now();
 
-    // نلتقط الاستجابة عند الانتهاء.
     res.on('finish', async () => {
       try {
         const success = res.statusCode >= 200 && res.statusCode < 400;
@@ -105,7 +118,10 @@ export const auditAction = (options) => {
           actorRole: actor.role || '',
           resource: resource || '',
           resourceId: resourceId || null,
-          description: typeof description === 'function' ? description(req, res) : description,
+          description:
+            typeof description === 'function'
+              ? description(req, res)
+              : description,
           before,
           after,
           changes,
@@ -129,12 +145,10 @@ export const auditAction = (options) => {
   };
 };
 
-/**
- * Middleware: يسجّل محاولات الدخول الناجحة والفاشلة.
- * نستخدمه في authRoutes للـ /login.
- *
- * @type {import('express').RequestHandler}
- */
+/* ─────────────────────────────────────────────────────────────
+ * 2) auditLogin
+ * ───────────────────────────────────────────────────────────── */
+
 export const auditLogin = (req, res, next) => {
   res.on('finish', async () => {
     try {
@@ -144,7 +158,9 @@ export const auditLogin = (req, res, next) => {
       const email = req.body?.email || '';
 
       await writeAudit({
-        action: success ? AUDIT_ACTIONS.LOGIN_SUCCESS : AUDIT_ACTIONS.LOGIN_FAILED,
+        action: success
+          ? AUDIT_ACTIONS.LOGIN_SUCCESS
+          : AUDIT_ACTIONS.LOGIN_FAILED,
         actor: actor._id || null,
         actorName: actor.name || '',
         actorEmail: actor.email || email,
@@ -169,10 +185,10 @@ export const auditLogin = (req, res, next) => {
   next();
 };
 
-/**
- * Middleware: يسجّل تسجيل الخروج.
- * @type {import('express').RequestHandler}
- */
+/* ─────────────────────────────────────────────────────────────
+ * 3) auditLogout
+ * ───────────────────────────────────────────────────────────── */
+
 export const auditLogout = (req, res, next) => {
   res.on('finish', async () => {
     try {
@@ -201,13 +217,10 @@ export const auditLogout = (req, res, next) => {
   next();
 };
 
-/**
- * Middleware: يسجّل أي عملية إنشاء/تحديث/حذف تلقائياً بناءً على method.
- * لا يحتاج وصفاً دقيقاً، مفيد لمسارات CRUD العامة.
- *
- * @param {string} resource
- * @returns {import('express').RequestHandler}
- */
+/* ─────────────────────────────────────────────────────────────
+ * 4) autoAudit — تلقائي حسب method
+ * ───────────────────────────────────────────────────────────── */
+
 export const autoAudit = (resource) => (req, res, next) => {
   const methodToAction = {
     POST: AUDIT_ACTIONS.CREATE,
@@ -251,21 +264,10 @@ export const autoAudit = (resource) => (req, res, next) => {
   next();
 };
 
-/**
- * دالة مساعدة لتسجيل حدث يدوياً من داخل controller.
- * مفيدة عندما نريد تسجيل حدث لا يمر عبر middleware (مثل حدث داخلي).
- *
- * @async
- * @param {Object} params
- * @param {import('express').Request} [params.req]
- * @param {string} params.action
- * @param {string} [params.resource]
- * @param {string|import('mongoose').Types.ObjectId} [params.resourceId]
- * @param {string} [params.description]
- * @param {boolean} [params.success]
- * @param {Object} [params.meta]
- * @returns {Promise<void>}
- */
+/* ─────────────────────────────────────────────────────────────
+ * 5) logAuditEvent — تسجيل يدوي (✅ v10.2: sanitized meta)
+ * ───────────────────────────────────────────────────────────── */
+
 export const logAuditEvent = async ({
   req,
   action,
@@ -276,6 +278,7 @@ export const logAuditEvent = async ({
   meta = null,
 }) => {
   const actor = req?.user || {};
+
   await writeAudit({
     action,
     actor: actor._id || null,
@@ -291,10 +294,10 @@ export const logAuditEvent = async ({
     changes: meta?.changes || null,
     errorCode: meta?.errorCode || '',
     errorMessage: meta?.errorMessage || '',
-   ip: getClientIp(req),        // ← آمن داخلياً (return '' إذا req = undefined)
-userAgent: getUserAgent(req), // ← آمن داخلياً
-method: req?.method || '',
-path: req?.originalUrl || '',
+    ip: getClientIp(req),
+    userAgent: getUserAgent(req),
+    method: req?.method || '',
+    path: req?.originalUrl || '',
     occurredAt: new Date(),
   });
 };

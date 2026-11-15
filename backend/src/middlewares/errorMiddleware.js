@@ -3,13 +3,10 @@
  * @description
  * معالجة موحّدة لكل الأخطاء في التطبيق.
  *
- * لماذا هذا الملف؟
- * - نمنع تسريب تفاصيل تقنية (stack traces, Mongo errors) إلى العميل.
- * - نُترجم أخطاء Mongoose و Zod إلى رسائل عربية واضحة + HTTP status صحيح.
- * - نُوفّر `notFoundHandler` لمسارات غير موجودة، و`errorHandler` النهائي.
- * - نُوفّر `asyncHandler` لتغليف الدوال غير المتزامنة تلقائياً، فلا نُكرّر
- *   `try/catch` في كل controller.
- * - في الإنتاج نُخفي الـ stack، وفي التطوير نُظهره لتسهيل التشخيص.
+ * ✅ v10.2 (2026-11-14):
+ * - errorHandler: sanitize — لا session/client/stack circular.
+ * - safeStringify — replacer — ضد circular.
+ * - res.json → res.send(safeStringify(...)).
  */
 
 import { ZodError } from 'zod';
@@ -17,20 +14,11 @@ import { ZodError } from 'zod';
 import { isProduction } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 
-/**
- * خطأ تطبيقي مخصّص يحمل HTTP status + رمز داخلي.
- * نستخدمه عندما نُريد رمي خطأ واضح من داخل controllers.
- *
- * @example
- * throw new AppError('البريد مستخدم مسبقاً', 409, 'EMAIL_TAKEN');
- */
+/* ─────────────────────────────────────────────────────────────
+ * AppError
+ * ───────────────────────────────────────────────────────────── */
+
 export class AppError extends Error {
-  /**
-   * @param {string} message - رسالة عربية موجّهة للمستخدم.
-   * @param {number} [statusCode=500] - HTTP status.
-   * @param {string} [code='APP_ERROR'] - رمز داخلي للتمييز.
-   * @param {Object} [details] - تفاصيل إضافية (اختيارية).
-   */
   constructor(message, statusCode = 500, code = 'APP_ERROR', details = undefined) {
     super(message);
     this.name = 'AppError';
@@ -42,24 +30,18 @@ export class AppError extends Error {
   }
 }
 
-/**
- * تغليف دوال async لتمرير الأخطاء إلى Express تلقائياً.
- * بلا هذا، أي `await` يفشل داخل route لن يصل إلى errorHandler.
- *
- * @template {import('express').RequestHandler} T
- * @param {T} fn
- * @returns {import('express').RequestHandler}
- */
+/* ─────────────────────────────────────────────────────────────
+ * asyncHandler
+ * ───────────────────────────────────────────────────────────── */
+
 export const asyncHandler = (fn) => (req, res, next) => {
   Promise.resolve(fn(req, res, next)).catch(next);
 };
 
-/**
- * معالج المسارات غير الموجودة (404).
- * يُسجَّل بعد كل الراوتس، قبل errorHandler.
- *
- * @type {import('express').RequestHandler}
- */
+/* ─────────────────────────────────────────────────────────────
+ * notFoundHandler
+ * ───────────────────────────────────────────────────────────── */
+
 export const notFoundHandler = (req, _res, next) => {
   next(
     new AppError(
@@ -70,14 +52,11 @@ export const notFoundHandler = (req, _res, next) => {
   );
 };
 
-/**
- * تحويل أخطاء Mongoose المعروفة إلى AppError موحّد.
- *
- * @param {Error} err
- * @returns {AppError | null}
- */
+/* ─────────────────────────────────────────────────────────────
+ * Normalizers
+ * ───────────────────────────────────────────────────────────── */
+
 const normalizeMongooseError = (err) => {
-  // خطأ تحقق من الـ Schema.
   if (err.name === 'ValidationError' && err.errors) {
     const details = Object.entries(err.errors).map(([field, e]) => ({
       field,
@@ -86,17 +65,15 @@ const normalizeMongooseError = (err) => {
     return new AppError('بيانات غير صالحة.', 400, 'VALIDATION_ERROR', details);
   }
 
-  // خطأ Cast (مثل ObjectId غير صالح).
   if (err.name === 'CastError') {
     return new AppError(
       `قيمة غير صالحة للحقل: ${err.path}`,
       400,
       'CAST_ERROR',
-      { field: err.path, value: err.value }
+      { field: err.path, value: String(err.value) }
     );
   }
 
-  // خطأ تكرار مفتاح فريد (unique index).
   if (err.code === 11000 && err.keyValue) {
     const fields = Object.keys(err.keyValue);
     return new AppError(
@@ -110,12 +87,6 @@ const normalizeMongooseError = (err) => {
   return null;
 };
 
-/**
- * تحويل أخطاء Zod إلى AppError موحّد.
- *
- * @param {ZodError} err
- * @returns {AppError}
- */
 const normalizeZodError = (err) => {
   const details = err.issues.map((issue) => ({
     field: issue.path.join('.') || '_root',
@@ -124,12 +95,6 @@ const normalizeZodError = (err) => {
   return new AppError('بيانات غير صالحة.', 400, 'VALIDATION_ERROR', details);
 };
 
-/**
- * تحويل أخطاء JWT المعروفة.
- *
- * @param {Error} err
- * @returns {AppError | null}
- */
 const normalizeJwtError = (err) => {
   if (err.name === 'TokenExpiredError') {
     return new AppError('انتهت صلاحية الجلسة.', 401, 'TOKEN_EXPIRED');
@@ -140,43 +105,82 @@ const normalizeJwtError = (err) => {
   return null;
 };
 
-/**
- * المعالج النهائي للأخطاء.
- * يجب أن يكون آخر middleware في السلسلة.
- *
- * @type {import('express').ErrorRequestHandler}
- */
+/* ─────────────────────────────────────────────────────────────
+ * ✅ v10.2 — safeStringify — replacer ضد circular
+ * ───────────────────────────────────────────────────────────── */
+
+const safeStringify = (obj) => {
+  const seen = new WeakSet();
+  return JSON.stringify(obj, (key, value) => {
+    if (
+      key === 'session' ||
+      key === 'client' ||
+      key === 'topology' ||
+      key === 's' ||
+      key === '$__' ||
+      key === 'sessionPool' ||
+      key === 'stack'
+    ) {
+      // stack: نُظهره فقط في التطوير — نُعيده كـ string
+      if (key === 'stack' && typeof value === 'string') {
+        return value.slice(0, 2000);
+      }
+      return undefined;
+    }
+    if (typeof value === 'object' && value !== null) {
+      if (seen.has(value)) return '[Circular]';
+      seen.add(value);
+    }
+    return value;
+  });
+};
+
+/* ─────────────────────────────────────────────────────────────
+ * errorHandler
+ * ───────────────────────────────────────────────────────────── */
+
 // eslint-disable-next-line no-unused-vars
 export const errorHandler = (err, req, res, _next) => {
-  // نطبّع الخطأ إلى AppError موحّد.
   let appError;
-  if (err instanceof AppError) {
-    appError = err;
-  } else if (err instanceof ZodError) {
-    appError = normalizeZodError(err);
-  } else {
-    appError =
-      normalizeMongooseError(err) ||
-      normalizeJwtError(err) ||
-      new AppError(
-        isProduction() ? 'حدث خطأ غير متوقع.' : err.message || 'خطأ غير معروف.',
-        err.statusCode && Number.isInteger(err.statusCode) ? err.statusCode : 500,
-        'INTERNAL_ERROR'
+  try {
+    if (err instanceof AppError) {
+      appError = err;
+    } else if (err instanceof ZodError) {
+      appError = normalizeZodError(err);
+    } else {
+      appError =
+        normalizeMongooseError(err) ||
+        normalizeJwtError(err) ||
+        new AppError(
+          isProduction()
+            ? 'حدث خطأ غير متوقع.'
+            : err.message || 'خطأ غير معروف.',
+          err.statusCode && Number.isInteger(err.statusCode)
+            ? err.statusCode
+            : 500,
+          'INTERNAL_ERROR'
+        );
+    }
+  } catch (normalizeErr) {
+    appError = new AppError('حدث خطأ غير متوقع.', 500, 'INTERNAL_ERROR');
+  }
+
+  // سجل
+  try {
+    if (appError.statusCode >= 500) {
+      logger.error(
+        `[${appError.code}] ${req.method} ${req.originalUrl} → ${appError.message}`
       );
+    } else if (!isProduction()) {
+      logger.debug(
+        `[${appError.code}] ${req.method} ${req.originalUrl} → ${appError.message}`
+      );
+    }
+  } catch {
+    /* تجاهل */
   }
 
-  // نُسجّل الأخطاء 5xx دائماً، و 4xx في التطوير فقط لتقليل الضجيج.
-  if (appError.statusCode >= 500) {
-    logger.error(
-      `[${appError.code}] ${req.method} ${req.originalUrl} → ${appError.message}`,
-      { stack: isProduction() ? undefined : err.stack }
-    );
-  } else if (!isProduction()) {
-    logger.debug(
-      `[${appError.code}] ${req.method} ${req.originalUrl} → ${appError.message}`
-    );
-  }
-
+  // body آمن
   const body = {
     success: false,
     error: {
@@ -186,15 +190,36 @@ export const errorHandler = (err, req, res, _next) => {
   };
 
   if (appError.details) {
-    body.error.details = appError.details;
+    try {
+      JSON.stringify(appError.details);
+      body.error.details = appError.details;
+    } catch {
+      body.error.details = null;
+    }
   }
 
-  // نُظهر stack فقط في التطوير.
   if (!isProduction() && err.stack) {
-    body.error.stack = err.stack;
+    body.error.stack = String(err.stack).slice(0, 2000);
   }
 
-  res.status(appError.statusCode).json(body);
+  // ✅ v10.2 — safeStringify — لا يفشل أبداً
+  let jsonString;
+  try {
+    jsonString = safeStringify(body);
+  } catch {
+    jsonString = JSON.stringify({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'حدث خطأ غير متوقع.' },
+    });
+  }
+
+  const statusCode =
+    appError.statusCode && Number.isInteger(appError.statusCode)
+      ? appError.statusCode
+      : 500;
+
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.status(statusCode).send(jsonString);
 };
 
 export default {

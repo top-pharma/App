@@ -6,6 +6,10 @@
  * - يعمل 02:00 صباحاً (Africa/Khartoum).
  * - يحفظ في BACKUP_DIR (من .env).
  * - Retention: آخر 7 يومية + 4 أسبوعية (أحد) + 3 شهرية (أول الشهر).
+ *
+ * ✅ v10.0 (2026-11-12):
+ * - cleanupOldBackups: منطق 7+4+3 صحيح (كان 7+(0-4)+(0-1)).
+ * - استخدام birthtime بدل mtime لتحديد العمر.
  */
 
 import cron from 'node-cron';
@@ -14,49 +18,90 @@ import path from 'node:path';
 import backupService from '../services/backupService.js';
 import { logger } from '../utils/logger.js';
 
-const BACKUP_DIR = process.env.BACKUP_DIR || 'E:\\Backups\\Pharma\\daily';
+const BACKUP_DIR_DEFAULT = 'E:\\Backups\\Pharma\\daily';
+const getBackupDir = () => process.env.BACKUP_DIR || BACKUP_DIR_DEFAULT;
 
 async function ensureDir() {
+  const dir = getBackupDir();
   try {
-    await fs.access(BACKUP_DIR);
+    await fs.access(dir);
   } catch {
-    await fs.mkdir(BACKUP_DIR, { recursive: true });
-    logger.info(`[autoBackup] 📁 أنشئ مجلد: ${BACKUP_DIR}`);
+    await fs.mkdir(dir, { recursive: true });
+    logger.info(`[autoBackup] 📁 أنشئ مجلد: ${dir}`);
   }
 }
 
+/**
+ * ✅ v10.0 — Retention 7 + 4 + 3.
+ */
 async function cleanupOldBackups() {
+  const dir = getBackupDir();
   try {
-    const files = (await fs.readdir(BACKUP_DIR))
+    const files = (await fs.readdir(dir))
       .filter((f) => f.startsWith('pharma-backup_') && f.endsWith('.json'))
       .sort()
       .reverse();
 
-    if (files.length <= 7) return;
-
-    const now = Date.now();
-    const keep = new Set(files.slice(0, 7));
-
-    for (const file of files.slice(7)) {
-      const stat = await fs.stat(path.join(BACKUP_DIR, file));
-      const ageDays = (now - stat.mtime.getTime()) / (24 * 60 * 60 * 1000);
-      const dayOfWeek = stat.mtime.getDay();
-      const dayOfMonth = stat.mtime.getDate();
-
-      if (dayOfWeek === 0 && ageDays <= 28) {
-        keep.add(file);
-        continue;
-      }
-      if (dayOfMonth === 1 && ageDays <= 92) {
-        keep.add(file);
-        continue;
-      }
-
-      await fs.unlink(path.join(BACKUP_DIR, file));
-      logger.info(`[autoBackup] 🗑️ حذف قديم: ${file}`);
+    if (files.length <= 14) {
+      logger.info(`[autoBackup] ✅ Retention: ${files.length}/14 — لا حذف`);
+      return;
     }
 
-    logger.info(`[autoBackup] ✅ Retention: ${keep.size} نسخة محفوظة`);
+    const stats = await Promise.all(
+      files.map(async (f) => {
+        const stat = await fs.stat(path.join(dir, f));
+        return {
+          f,
+          createdAt: stat.birthtimeMs > 0 ? stat.birthtime : stat.mtime,
+        };
+      })
+    );
+
+    const now = Date.now();
+    const ageDays = (d) => (now - d.getTime()) / (24 * 60 * 60 * 1000);
+
+    // 7 يومية — الأحدث دائماً
+    const daily = stats.slice(0, 7);
+    const dailySet = new Set(daily.map((d) => d.f));
+
+    // 4 أسبوعية — أحد، أقدم من 7 أيام
+    const weekly = stats
+      .filter(
+        ({ f, createdAt }) =>
+          !dailySet.has(f) &&
+          createdAt.getDay() === 0 &&
+          ageDays(createdAt) > 7
+      )
+      .slice(0, 4);
+    const weeklySet = new Set(weekly.map((w) => w.f));
+
+    // 3 شهرية — أول الشهر، أقدم من 28 يوم
+    const monthly = stats
+      .filter(
+        ({ f, createdAt }) =>
+          !dailySet.has(f) &&
+          !weeklySet.has(f) &&
+          createdAt.getDate() === 1 &&
+          ageDays(createdAt) > 28
+      )
+      .slice(0, 3);
+
+    const keep = new Set([
+      ...daily.map((d) => d.f),
+      ...weeklySet,
+      ...monthly.map((m) => m.f),
+    ]);
+
+    for (const { f } of stats) {
+      if (!keep.has(f)) {
+        await fs.unlink(path.join(dir, f));
+        logger.info(`[autoBackup] 🗑️ حذف قديم: ${f}`);
+      }
+    }
+
+    logger.info(
+      `[autoBackup] ✅ Retention: ${keep.size} نسخة (7 يومية + ${weekly.length} أسبوعية + ${monthly.length} شهرية)`
+    );
   } catch (err) {
     logger.warn(`[autoBackup] فشل cleanup: ${err.message}`);
   }
@@ -64,6 +109,7 @@ async function cleanupOldBackups() {
 
 export async function runAutoBackup() {
   const startedAt = Date.now();
+  const dir = getBackupDir();
   try {
     await ensureDir();
 
@@ -72,7 +118,7 @@ export async function runAutoBackup() {
       user: { email: 'system-cron' },
     });
 
-    const fullPath = path.join(BACKUP_DIR, filename);
+    const fullPath = path.join(dir, filename);
     await fs.writeFile(fullPath, buffer);
 
     const docCount = Object.values(counts || {}).reduce(
@@ -96,7 +142,7 @@ export function startAutoBackupJob() {
   cron.schedule('0 2 * * *', runAutoBackup, {
     timezone: 'Africa/Khartoum',
   });
-  logger.info(`[autoBackup] ⏰ Backup يومي (02:00 → ${BACKUP_DIR})`);
+  logger.info(`[autoBackup] ⏰ Backup يومي (02:00 → ${getBackupDir()})`);
 }
 
 export default { startAutoBackupJob, runAutoBackup };

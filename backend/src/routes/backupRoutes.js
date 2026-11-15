@@ -1,10 +1,9 @@
 /**
  * @file backupRoutes.js
- * @description مسارات النسخ الاحتياطي والاستعادة + قائمة النسخ.
+ * @description مسارات النسخ الاحتياطي والاستعادة + قائمة + تنزيل.
  *
- * الحماية:
- * - requireAuth
- * - requirePermissions('settings.update') — admin فقط
+ * ✅ v10.0 (2026-11-12):
+ * - إضافة GET /download/:filename.
  */
 
 import express from 'express';
@@ -20,6 +19,7 @@ router.use(requirePermissions('settings.update'));
 router.get('/info', backupController.getInfo);
 router.get('/list', backupController.listBackups);
 router.get('/export', backupController.exportBackup);
+router.get('/download/:filename', backupController.downloadBackup);
 router.post('/restore', backupController.restoreBackup);
 
 export default router;

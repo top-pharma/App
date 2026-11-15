@@ -10,14 +10,11 @@
  *   1. قائمة السجلات (مع فلاتر متقدمة).
  *   2. سجل واحد (تفاصيل كاملة).
  *   3. سجلات مورد محدد (كل حركات حساب بنكي/صندوق/فاتورة).
- *   4. إحصائيات سريعة (اختياري).
+ *   4. إحصائيات سريعة.
  */
 
 import AuditLog from '../models/AuditLog.js';
 import { AppError } from '../middlewares/errorMiddleware.js';
-import logger from '../utils/logger.js';
-
-const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
 /* ─────────────────────────────────────────────────────────────
  * Helpers
@@ -27,16 +24,7 @@ const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
  * بناء filter من query params.
  */
 const buildFilter = (query) => {
-  const {
-    action,
-    resource,
-    resourceId,
-    actor,
-    success,
-    from,
-    to,
-    search,
-  } = query;
+  const { action, resource, resourceId, actor, success, from, to, search } = query;
 
   const filter = {};
 
@@ -122,8 +110,10 @@ export const listAuditLogs = async (req, res, next) => {
  * ───────────────────────────────────────────────────────────── */
 export const getAuditLog = async (req, res, next) => {
   try {
-    const log = await AuditLog.findById(req.params.id)
-      .populate('actor', 'name email role');
+    const log = await AuditLog.findById(req.params.id).populate(
+      'actor',
+      'name email role'
+    );
 
     if (!log) {
       throw new AppError('السجل غير موجود', 404, 'AUDIT_LOG_NOT_FOUND');

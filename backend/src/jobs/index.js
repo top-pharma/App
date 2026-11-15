@@ -5,31 +5,18 @@
  *
  * ✅ 🅲 (2026-11-08):
  * - حُذف checkDueAlert (Check أُلغي).
- * - المهام المتبقية: expiryAlert, reorderAlert, invoiceDueAlert (3×08:00) + autoBackup (1×02:00).
  *
- * المهام المُفعّلة:
- *  - 08:00 (Africa/Khartoum):
- *      • expiryAlert     : الدفعات القاربة على الانتهاء (Phase 1)
- *      • reorderAlert    : الأصناف تحت الحد الأدنى (Phase 1)
- *      • invoiceDueAlert : الفواتير المتأخرة (Phase 2)
- *  - 02:00 (Africa/Khartoum):
- *      • autoBackup      : نسخة JSON احتياطية (Phase 5.5)
+ * ✅ v10.0 (2026-11-12):
+ * - سجل أوضح — تم تضمين autoBackup صراحةً.
  */
 
 import cron from 'node-cron';
 import runExpiryAlert from './expiryAlert.js';
 import runReorderAlert from './reorderAlert.js';
 import runInvoiceDueAlert from './invoiceDueAlert.js';
-// ⚠️ 🅲: حُذف import runCheckDueAlert
 import { startAutoBackupJob, runAutoBackup } from './autoBackup.js';
 import logger from '../utils/logger.js';
 
-/**
- * الغلاف الآمن لكل Job — يمنع فشل job من إسقاط الباقي.
- * @param {Function} jobFn
- * @param {string} jobName
- * @returns {Function}
- */
 const safeJob = (jobFn, jobName) => async () => {
   const startedAt = Date.now();
   try {
@@ -41,10 +28,6 @@ const safeJob = (jobFn, jobName) => async () => {
   }
 };
 
-/**
- * يبدأ جميع المهام المجدولة.
- * يُستدعى مرة واحدة عند بدء السيرفر (من server.js).
- */
 export const startJobs = () => {
   // ─── Phase 1: expiryAlert ───
   cron.schedule(
@@ -67,26 +50,19 @@ export const startJobs = () => {
     { timezone: 'Africa/Khartoum' }
   );
 
-  // ⚠️ 🅲: حُذف checkDueAlert (Check أُلغي)
-
   // ─── Phase 5.5: autoBackup (02:00) ───
   startAutoBackupJob();
 
-  logger.info('[jobs] ⏰ تم تفعيل 4 مهام مجدولة (3×08:00 + 1×02:00 Africa/Khartoum)');
+  logger.info(
+    '[jobs] ⏰ 4 مهام مجدولة: expiryAlert + reorderAlert + invoiceDueAlert (08:00) + autoBackup (02:00) — Africa/Khartoum'
+  );
 };
 
-/**
- * يُشغّل جميع المهام يدوياً (للاستخدام في scripts/test-jobs.js).
- * @returns {Promise<Object>} ملخص النتائج
- *
- * ✅ 🅲: حُذف checkDueAlert.
- */
 export const runAllJobsManually = async () => {
   const results = {
     expiryAlert: null,
     reorderAlert: null,
     invoiceDueAlert: null,
-    // ⚠️ 🅲: حُذف checkDueAlert
     autoBackup: null,
     errors: [],
   };
@@ -95,7 +71,6 @@ export const runAllJobsManually = async () => {
     { name: 'expiryAlert', fn: runExpiryAlert },
     { name: 'reorderAlert', fn: runReorderAlert },
     { name: 'invoiceDueAlert', fn: runInvoiceDueAlert },
-    // ⚠️ 🅲: حُذف checkDueAlert
     { name: 'autoBackup', fn: runAutoBackup },
   ];
 

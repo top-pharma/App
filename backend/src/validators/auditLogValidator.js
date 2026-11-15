@@ -4,7 +4,7 @@
  * مخططات Zod للتحقق من مدخلات سجل التدقيق (AuditLog).
  *
  * لماذا هذا الملف؟
- * - نمنع تمرير حقول غير مسموحة في الاستعلام (مثل actorRole المباشر).
+ * - نمنع تمرير حقول غير مسموحة في الاستعلام.
  * - نتحقق من صحة ObjectId في params.
  * - نحدد القيم المسموحة لـ action و success.
  */
@@ -35,20 +35,6 @@ const optionalDateSchema = z
 // 2. قائمة سجلات التدقيق — GET /api/audit-logs
 // ═══════════════════════════════════════════════
 
-/**
- * معاملات الاستعلام المسموحة.
- *
- * - page/limit: الترقيم.
- * - action: نوع العملية (create/update/delete/login_success/...).
- * - resource: المورد (BankAccount/CashFund/User/...).
- * - resourceId: معرّف المورد.
- * - actor: معرّف المستخدم.
- * - success: true/false/all.
- * - from/to: نطاق زمني (occurredAt).
- * - search: بحث في description/actorName/actorEmail/path.
- * - sortBy: حقل الترتيب.
- * - sortOrder: asc/desc.
- */
 export const listAuditLogsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(20),

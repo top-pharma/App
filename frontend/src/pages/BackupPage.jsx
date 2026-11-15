@@ -1,6 +1,11 @@
 /**
  * @file BackupPage.jsx
  * @description صفحة النسخ الاحتياطي والاستعادة (Phase 5 + 5.5) — admin فقط.
+ *
+ * ✅ v10.0 (2026-11-12):
+ * - subtitle ديناميكي (يعرض عدد النسخ الفعلي).
+ * - زر تنزيل لكل صف في القائمة.
+ * - عرض preRestorePath بعد الاستعادة (للتأكيد).
  */
 
 import { useState, useEffect, useRef } from 'react';
@@ -47,6 +52,7 @@ export default function BackupPage() {
 
   const [backups, setBackups] = useState([]);
   const [loadingBackups, setLoadingBackups] = useState(false);
+  const [downloadingFile, setDownloadingFile] = useState(null);
 
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [restoreFile, setRestoreFile] = useState(null);
@@ -75,7 +81,7 @@ export default function BackupPage() {
       const data = await backupAPI.listBackups();
       setBackups(data || []);
     } catch {
-      // صامت — قد لا توجد نسخ بعد
+      // صامت
     } finally {
       setLoadingBackups(false);
     }
@@ -97,6 +103,19 @@ export default function BackupPage() {
       toast?.error?.(err?.error?.message || 'فشل التصدير.');
     } finally {
       setExporting(false);
+    }
+  };
+
+  const handleDownload = async (filename) => {
+    setDownloadingFile(filename);
+    try {
+      const { blob, filename: fname } = await backupAPI.downloadBackup(filename);
+      await downloadBlobSafe(blob, fname);
+      toast?.success?.('تم تنزيل النسخة.');
+    } catch (err) {
+      toast?.error?.(err?.error?.message || 'فشل التنزيل.');
+    } finally {
+      setDownloadingFile(null);
     }
   };
 
@@ -162,7 +181,7 @@ export default function BackupPage() {
 
   return (
     <div className="space-y-4">
-      {/* ── Header ── */}
+      {/* Header */}
       <Card
         title="مركز النسخ الاحتياطي"
         subtitle="تصدير كامل لبيانات النظام / استعادة من ملف"
@@ -180,7 +199,7 @@ export default function BackupPage() {
         </div>
       </Card>
 
-      {/* ── Info ── */}
+      {/* Info */}
       <Card
         title="حالة البيانات الحالية"
         icon={FileText}
@@ -212,10 +231,14 @@ export default function BackupPage() {
         )}
       </Card>
 
-      {/* ── Local Backups ── */}
+      {/* Local Backups */}
       <Card
         title="النسخ المحفوظة تلقائياً"
-        subtitle="آخر 7 نسخ يومية + 4 أسبوعية + 3 شهرية"
+        subtitle={
+          backups.length > 0
+            ? `${backups.length} نسخة محفوظة (السياسة: 7 يومية + 4 أسبوعية + 3 شهرية)`
+            : 'آخر 7 نسخ يومية + 4 أسبوعية + 3 شهرية'
+        }
         icon={Database}
         actions={
           <Button
@@ -232,7 +255,7 @@ export default function BackupPage() {
           <Loading text="جاري التحميل..." />
         ) : backups.length === 0 ? (
           <p className="text-sm text-neutral-500">
-            لا توجد نسخ بعد — ستظهر تلقائياً كل ليلة 02:00 (بعد تفعيل cron).
+            لا توجد نسخ بعد — ستظهر تلقائياً كل ليلة 02:00.
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -248,6 +271,9 @@ export default function BackupPage() {
                   <th className="px-3 py-2 text-center font-bold text-neutral-700">
                     التاريخ
                   </th>
+                  <th className="px-3 py-2 text-center font-bold text-neutral-700">
+                    تنزيل
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-100">
@@ -262,6 +288,17 @@ export default function BackupPage() {
                     <td className="px-3 py-2 text-center text-xs">
                       {new Date(b.createdAt).toLocaleString('en-GB')}
                     </td>
+                    <td className="px-3 py-2 text-center">
+                      <button
+                        type="button"
+                        onClick={() => handleDownload(b.filename)}
+                        disabled={downloadingFile === b.filename}
+                        className="p-1 rounded hover:bg-primary-50 text-primary-600 disabled:opacity-50"
+                        title="تنزيل"
+                      >
+                        <Download size={14} />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -270,7 +307,7 @@ export default function BackupPage() {
         )}
       </Card>
 
-      {/* ── Export ── */}
+      {/* Export */}
       <Card title="تصدير نسخة احتياطية" icon={Download}>
         <p className="text-sm text-neutral-600 mb-4">
           يُنشئ ملف JSON يحتوي كل بيانات النظام (بما فيها كلمات المرور
@@ -286,11 +323,12 @@ export default function BackupPage() {
         </Button>
       </Card>
 
-      {/* ── Restore ── */}
+      {/* Restore */}
       <Card title="استعادة من ملف" icon={Upload}>
         <p className="text-sm text-neutral-600 mb-4">
           ارفع ملف JSON أنشأته هذه الصفحة سابقاً. الاستعادة تمسح البيانات
-          الحالية أولاً — تأكد من عمل نسخة احتياطية قبل المتابعة.
+          الحالية أولاً — تأكد من عمل نسخة احتياطية قبل المتابعة. النظام يقوم
+          تلقائياً بعمل نسخة pre-restore قبل التنفيذ.
         </p>
         <Button
           variant="danger"
@@ -301,7 +339,7 @@ export default function BackupPage() {
         </Button>
       </Card>
 
-      {/* ── Modal: Restore ── */}
+      {/* Modal: Restore */}
       <Modal
         isOpen={restoreOpen}
         onClose={closeRestore}
@@ -333,8 +371,9 @@ export default function BackupPage() {
               <p className="font-bold">إجراء تدميري</p>
               <p>
                 كل البيانات الحالية (عدا سجل التدقيق) ستُمسَح وتُستبدَل
-                بالبيانات من الملف. لا يمكن التراجع إلا باستعادة النسخة
-                الاحتياطية الحالية.
+                بالبيانات من الملف. النظام سيقوم تلقائياً بعمل نسخة
+                pre-restore قبل التنفيذ. العملية داخل transaction — إما تنجح
+                كاملة أو تُلغى.
               </p>
             </div>
           </div>
@@ -411,6 +450,11 @@ export default function BackupPage() {
                     {restoreResult.data?.totals?.deleted ?? 0} — أخطاء:{' '}
                     {restoreResult.data?.totals?.errors ?? 0}
                   </p>
+                  {restoreResult.data?.preRestorePath && (
+                    <p className="text-[10px] mt-1 font-mono break-all" dir="ltr">
+                      pre-restore: {restoreResult.data.preRestorePath}
+                    </p>
+                  )}
                 </div>
               </div>
             </div>

@@ -3,58 +3,25 @@
  * @description
  * طبقة الاتصال بـ Backup API (Phase 5).
  *
- * المسارات (backend: app.use('/api/backup', backupRoutes)):
- *   GET  /backup/info     → getBackupInfo
- *   GET  /backup/list     → listBackups
- *   GET  /backup/export   → exportBackup (JSON attachment)
- *   POST /backup/restore  → restoreBackup (body = parsed JSON)
- *
- * ملاحظات:
- *  - axiosInstance يضيف Authorization + معالجة 401 تلقائيًا.
- *  - baseURL يحتوي /api، لذلك المسارات هنا تبدأ بـ /backup فقط.
- *  - الاستعادة قد تستغرق وقتًا (حتى 50MB) → timeout أعلى.
+ * ✅ v10.0 (2026-11-12):
+ * - إضافة downloadBackup(filename).
  */
 
 import axiosInstance from './axiosInstance.js';
 
-// ═══════════════════════════════════════════════
-// 1. معلومات البيانات الحالية
-// ═══════════════════════════════════════════════
-
-/**
- * جلب معلومات البيانات الحالية (عدد السجلات، المجموعات، إلخ).
- * @returns {Promise<{
- *   totalDocuments: number,
- *   collections: number,
- *   counts: Object<string, number>,
- * }>}
- */
+/* 1. معلومات البيانات الحالية */
 export async function getBackupInfo() {
   const { data } = await axiosInstance.get('/backup/info');
   return data.data;
 }
 
-// ═══════════════════════════════════════════════
-// 2. قائمة النسخ المحفوظة على القرص
-// ═══════════════════════════════════════════════
-
-/**
- * جلب قائمة النسخ الاحتياطية المحفوظة تلقائيًا.
- * @returns {Promise<Array<{ filename: string, size: number, createdAt: string }>>}
- */
+/* 2. قائمة النسخ المحفوظة على القرص */
 export async function listBackups() {
   const { data } = await axiosInstance.get('/backup/list');
   return data.data;
 }
 
-// ═══════════════════════════════════════════════
-// 3. التصدير (تنزيل ملف JSON)
-// ═══════════════════════════════════════════════
-
-/**
- * تصدير نسخة احتياطية كاملة (JSON) كملف للتنزيل.
- * @returns {Promise<{ blob: Blob, filename: string }>}
- */
+/* 3. التصدير (تنزيل ملف JSON) */
 export async function exportBackup() {
   const response = await axiosInstance.get('/backup/export', {
     responseType: 'blob',
@@ -75,25 +42,19 @@ export async function exportBackup() {
   return { blob: response.data, filename };
 }
 
-// ═══════════════════════════════════════════════
-// 4. الاستعادة (رفع JSON كـ body)
-// ═══════════════════════════════════════════════
+/* 4. التنزيل من القائمة — ✅ v10.0 جديد */
+export async function downloadBackup(filename) {
+  const response = await axiosInstance.get(
+    `/backup/download/${encodeURIComponent(filename)}`,
+    {
+      responseType: 'blob',
+      timeout: 5 * 60 * 1000,
+    }
+  );
+  return { blob: response.data, filename };
+}
 
-/**
- * استعادة قاعدة البيانات من كائن JSON مُحلَّل (parsed).
- * ⚠️ إجراء تدميري — يمسح البيانات الحالية أولاً.
- *
- * @param {Object} parsedBackup - الكائن الناتج من JSON.parse(file)
- * @returns {Promise<{
- *   success: boolean,
- *   message: string,
- *   data: {
- *     totals: { inserted: number, deleted: number, errors: number },
- *     duration: number,
- *     results: Object,
- *   },
- * }>}
- */
+/* 5. الاستعادة (رفع JSON كـ body) */
 export async function restoreBackup(parsedBackup) {
   const { data } = await axiosInstance.post('/backup/restore', parsedBackup, {
     timeout: 15 * 60 * 1000,
@@ -101,13 +62,11 @@ export async function restoreBackup(parsedBackup) {
   return data;
 }
 
-// ═══════════════════════════════════════════════
-// 5. تصدير افتراضي
-// ═══════════════════════════════════════════════
-
+/* 6. تصدير افتراضي */
 export default {
   getBackupInfo,
   listBackups,
   exportBackup,
+  downloadBackup,
   restoreBackup,
 };

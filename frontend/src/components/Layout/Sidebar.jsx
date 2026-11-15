@@ -1,25 +1,10 @@
 /**
  * @file Sidebar.jsx
- * @description القائمة الجانبية — Phase D (RBAC كامل).
+ * @description القائمة الجانبية — Phase D (RBAC كامل) + AuditLogs.
  *
- * ⚠️ Phase D:
- * - كل التبويبات تعتمد على hasPermission (لا hardcoded roles).
- * - كل عنصر فرعي داخل المجموعات مفحوص بصلاحيته.
- * - الروابط الخاصة (صيدلياتي، فواتيري) = role + permission.
- * - Backup link أُضيف (settings.update).
- * - لا يوجد isAdmin/isStorekeeper... — استُبدلت بـ hasPermission.
- *
- * ✅ 🅱 (2026-11-08):
- * - حذف `Truck` من imports (لم يعد مستخدماً — كان في رابط إيصالات التسليم).
- * - حذف `'delivery_notes.view'` من canViewSales.
- * - حذف رابط "إيصالات التسليم" من مجموعة المبيعات.
- *
- * ✅ 🅲 (2026-11-08):
- * - حذف `useContext` من imports (لم يعد مستخدماً).
- * - حذف `FileCheck` من imports.
- * - حذف `import ChecksContext`.
- * - حذف `checksCtx` + `pendingChecksCount`.
- * - حذف رابط "الشيكات" من مجموعة المالية.
+ * ⚠️ إصلاح 2026-11-12:
+ * - F1: إضافة رابط "سجل التدقيق" — بصلاحية `audit.view`.
+ * - F2: إضافة `ScrollText` (موجود) — `FileText` (موجود).
  */
 
 import { useState } from 'react';
@@ -29,7 +14,6 @@ import {
   Package,
   ShoppingCart,
   FileText,
-  // ⚠️ 🅱: حُذف Truck
   Undo2,
   Users,
   Building2,
@@ -45,7 +29,6 @@ import {
   Coins,
   Bell,
   Landmark,
-  // ⚠️ 🅲: حُذف FileCheck
   ScrollText,
   BarChart3,
   TrendingUp,
@@ -55,12 +38,11 @@ import {
 } from 'lucide-react';
 
 import { useAuth } from '../../hooks/useAuth.js';
-// ⚠️ 🅲: حُذف import ChecksContext
 import { useNotifications } from '../../hooks/useNotifications.js';
 import { ROLE_LABELS_AR } from '../../utils/constants.js';
 
 // ═══════════════════════════════════════════════
-// مكونات فرعية (بدون تغيير)
+// 1. مكونات فرعية
 // ═══════════════════════════════════════════════
 
 function SidebarLink({ to, icon: Icon, label, end = false, badge = 0 }) {
@@ -69,9 +51,10 @@ function SidebarLink({ to, icon: Icon, label, end = false, badge = 0 }) {
       to={to}
       end={end}
       className={({ isActive }) =>
-        `flex items-center gap-3 px-4 py-2.5 rounded-md text-sm font-medium transition-colors ${isActive
-          ? 'bg-primary-800 text-white'
-          : 'text-neutral-700 hover:bg-neutral-100'
+        `flex items-center gap-3 px-4 py-2.5 rounded-md text-sm font-medium transition-colors ${
+          isActive
+            ? 'bg-primary-800 text-white'
+            : 'text-neutral-700 hover:bg-neutral-100'
         }`
       }
     >
@@ -86,13 +69,7 @@ function SidebarLink({ to, icon: Icon, label, end = false, badge = 0 }) {
   );
 }
 
-function SidebarGroup({
-  title,
-  icon: Icon,
-  children,
-  defaultOpen = false,
-  isActiveGroup,
-}) {
+function SidebarGroup({ title, icon: Icon, children, defaultOpen = false, isActiveGroup }) {
   const [isOpen, setIsOpen] = useState(defaultOpen || isActiveGroup);
 
   return (
@@ -100,10 +77,11 @@ function SidebarGroup({
       <button
         type="button"
         onClick={() => setIsOpen((prev) => !prev)}
-        className={`w-full flex items-center justify-between gap-3 px-4 py-2.5 rounded-md text-sm font-medium transition-colors ${isActiveGroup
-          ? 'bg-primary-50 text-primary-800'
-          : 'text-neutral-700 hover:bg-neutral-100'
-          }`}
+        className={`w-full flex items-center justify-between gap-3 px-4 py-2.5 rounded-md text-sm font-medium transition-colors ${
+          isActiveGroup
+            ? 'bg-primary-50 text-primary-800'
+            : 'text-neutral-700 hover:bg-neutral-100'
+        }`}
       >
         <div className="flex items-center gap-3">
           {Icon && <Icon size={18} className="flex-shrink-0" />}
@@ -126,21 +104,18 @@ function SidebarGroup({
 }
 
 // ═══════════════════════════════════════════════
-// المكون الرئيسي — Phase D
+// 2. المكون الرئيسي
 // ═══════════════════════════════════════════════
 
 function Sidebar() {
   const { userRole, isSalesRep, isPharmacy, hasPermission } = useAuth();
   const location = useLocation();
-
-  // ⚠️ 🅲: حُذف checksCtx + pendingChecksCount
-
   const { unreadCount } = useNotifications();
 
-  // ─── مساعد: هل يملك المستخدم أيّاً من هذه الصلاحيات؟ ───
+  // ─── مساعد ───
   const canAny = (perms) => perms.some((p) => hasPermission(p));
 
-  // ─── مجموعات (تظهر إذا كان للمستخدم أي صلاحية من صلاحياتها) ───
+  // ─── مجموعات ───
   const canViewInventory = canAny([
     'categories.view',
     'warehouses.view',
@@ -152,7 +127,6 @@ function Sidebar() {
 
   const canViewSales = canAny([
     'invoices.view',
-    // ⚠️ 🅱: حُذف 'delivery_notes.view'
     'customer_returns.view',
   ]);
 
@@ -165,15 +139,15 @@ function Sidebar() {
     'finance.view',
     'finance.transactions.view',
     'finance.entries.view',
-    // ⚠️ 🅲: حُذف 'finance.checks.manage'
   ]);
 
   const canViewReports = hasPermission('reports.view');
   const canViewDashboard = hasPermission('reports.view');
   const canViewUsers = hasPermission('users.view');
+  const canViewAuditLogs = hasPermission('audit.view');  // ✅ جديد
   const canViewBackup = hasPermission('settings.update');
 
-  // ─── الروابط الخاصة (role + permission) ───
+  // ─── الروابط الخاصة ───
   const canViewMyPharmacies = isSalesRep && hasPermission('customers.view');
   const canViewMyInvoices = isPharmacy && hasPermission('invoices.view');
 
@@ -233,7 +207,6 @@ function Sidebar() {
             {hasPermission('invoices.view') && (
               <SidebarLink to="/sales/invoices" icon={FileText} label="الفواتير" />
             )}
-            {/* ⚠️ 🅱: حُذف رابط "إيصالات التسليم" */}
             {hasPermission('customer_returns.view') && (
               <SidebarLink to="/sales/customer-returns" icon={Undo2} label="مرتجعات العملاء" />
             )}
@@ -275,7 +248,6 @@ function Sidebar() {
             {hasPermission('finance.view') && (
               <SidebarLink to="/finance/bank-accounts" icon={Landmark} label="الحساب البنكي" />
             )}
-            {/* ⚠️ 🅲: حُذف رابط "الشيكات" */}
             {hasPermission('finance.transactions.view') && (
               <SidebarLink to="/finance/cash-transactions" icon={Receipt} label="الحركات النقدية" />
             )}
@@ -316,12 +288,17 @@ function Sidebar() {
           <SidebarLink to="/users" icon={UserCog} label="المستخدمون والموظفون" />
         )}
 
-        {/* النسخ الاحتياطي — D1 */}
+        {/* ✅ سجل التدقيق — جديد */}
+        {canViewAuditLogs && (
+          <SidebarLink to="/audit-logs" icon={ScrollText} label="سجل التدقيق" />
+        )}
+
+        {/* النسخ الاحتياطي */}
         {canViewBackup && (
           <SidebarLink to="/backup" icon={Database} label="النسخ الاحتياطي" />
         )}
 
-        {/* الإعدادات — D5 */}
+        {/* الإعدادات */}
         {hasPermission('settings.view') && (
           <SidebarLink to="/settings" icon={Settings} label="الإعدادات" />
         )}

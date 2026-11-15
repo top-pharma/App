@@ -283,6 +283,7 @@ export const NOTIFICATION_LEVEL_BADGE = Object.freeze({
   danger: 'bg-danger-100 text-danger-800',
 });
 
+
 // ═══════════════════════════════════════════════
 // 16. تصدير افتراضي
 // ═══════════════════════════════════════════════
@@ -316,3 +317,24 @@ export default {
   NOTIFICATION_LEVEL_LABELS_AR,
   NOTIFICATION_LEVEL_BADGE,
 };
+
+// ═══════════════════════════════════════════════
+// 17. سجل التدقيق (AuditLog) — Phase 5
+// ═══════════════════════════════════════════════
+export const AUDIT_ACTION_LABELS_AR = Object.freeze({
+  create: 'إنشاء',
+  update: 'تعديل',
+  delete: 'حذف',
+  login_success: 'دخول ناجح',
+  login_failed: 'دخول فاشل',
+  logout: 'خروج',
+  password_change: 'تغيير كلمة مرور',
+  password_reset_request: 'طلب إعادة تعيين',
+  password_reset_complete: 'إعادة تعيين كاملة',
+  permission_denied: 'صلاحية مرفوضة',
+  account_locked: 'حساب مقفل',
+  account_unlocked: 'حساب مفتوح',
+  refresh_token: 'تحديث التوكن',
+  export: 'تصدير',
+  backup: 'نسخ احتياطي',
+});

@@ -1,18 +1,11 @@
 /**
  * @file AppRoutes.jsx
  * @description
- * تعريف مسارات التطبيق — Phase 4 + Phase 5.
+ * تعريف مسارات التطبيق — Phase 4 + Phase 5 + AuditLogs.
  *
- * ⚠️ كل المسارات المحمية (بما فيها /notifications و /backup)
- *    يجب أن تكون داخل <Route element={<Layout />}>.
- *
- * ✅ 🅱 (2026-11-08):
- * - حذف `DeliveryNotes` (lazy import).
- * - حذف route `/sales/delivery-notes`.
- *
- * ✅ 🅲 (2026-11-08):
- * - حذف `ChecksPage` + `CheckDetailPage` (lazy imports).
- * - حذف routes `/finance/checks` + `/finance/checks/:id`.
+ * ⚠️ إصلاح 2026-11-12:
+ * - F1: إضافة `AuditLogsPage` (lazy import).
+ * - F2: إضافة route `/audit-logs` — بصلاحية `audit.view`.
  */
 
 import { lazy, Suspense } from 'react';
@@ -53,7 +46,6 @@ const Stock = lazy(() => import('../pages/Stock.jsx'));
 const Sales = lazy(() => import('../pages/Sales.jsx'));
 const Invoices = lazy(() => import('../pages/Invoices.jsx'));
 const InvoiceDetail = lazy(() => import('../pages/InvoiceDetail.jsx'));
-// ⚠️ 🅱: حُذف DeliveryNotes
 const CustomerReturns = lazy(() => import('../pages/CustomerReturns.jsx'));
 const PurchaseReceipts = lazy(() => import('../pages/PurchaseReceipts.jsx'));
 const SupplierReturns = lazy(() => import('../pages/SupplierReturns.jsx'));
@@ -64,8 +56,6 @@ const SupplierReturns = lazy(() => import('../pages/SupplierReturns.jsx'));
 const FinancePage = lazy(() => import('../pages/FinancePage.jsx'));
 const CashFundsPage = lazy(() => import('../pages/CashFundsPage.jsx'));
 const BankAccountsPage = lazy(() => import('../pages/BankAccountsPage.jsx'));
-// ⚠️ 🅲: حُذف ChecksPage
-// ⚠️ 🅲: حُذف CheckDetailPage
 const CashTransactionsPage = lazy(() => import('../pages/CashTransactionsPage.jsx'));
 const AccountingEntriesPage = lazy(() => import('../pages/AccountingEntriesPage.jsx'));
 
@@ -84,10 +74,16 @@ const InventoryReportsPage = lazy(() => import('../pages/InventoryReportsPage.js
 // ═══════════════════════════════════════════════════════════
 const NotificationsPage = lazy(() => import('../pages/NotificationsPage.jsx'));
 const BackupPage = lazy(() => import('../pages/BackupPage.jsx'));
+
 // ═══════════════════════════════════════════════════════════
 // 8. Phase C — Users Management
 // ═══════════════════════════════════════════════════════════
 const UsersPage = lazy(() => import('../pages/UsersPage.jsx'));
+
+// ═══════════════════════════════════════════════════════════
+// ✅ Phase 5 — AuditLogs (جديد)
+// ═══════════════════════════════════════════════════════════
+const AuditLogsPage = lazy(() => import('../pages/AuditLogsPage.jsx'));
 
 // ═══════════════════════════════════════════════════════════
 // 9. Phase C — Change Password (forced)
@@ -100,7 +96,7 @@ const ChangePasswordPage = lazy(() => import('../pages/ChangePasswordPage.jsx'))
 const SettingsPage = lazy(() => import('../pages/SettingsPage.jsx'));
 
 // ═══════════════════════════════════════════════════════════
-// 8. Suspense Fallback
+// 11. Suspense Fallback
 // ═══════════════════════════════════════════════════════════
 const SuspenseFallback = () => (
   <div className="flex items-center justify-center min-h-screen bg-neutral-50">
@@ -109,19 +105,8 @@ const SuspenseFallback = () => (
 );
 
 // ═══════════════════════════════════════════════════════════
-// 8.5. HomeRedirect — الصفحة الرئيسية حسب الصلاحيات
+// 12. HomeRedirect — الصفحة الرئيسية حسب الصلاحيات
 // ═══════════════════════════════════════════════════════════
-/**
- * الصفحة الرئيسية للمستخدم حسب صلاحياته.
- *
- * ⚠️ BUG #1 Fix: بدل إظهار Dashboard للجميع (يفشل بـ 403 للأدوار
- * التي لا تملك reports.view)، نوجّه كل مستخدم لأول صفحة مسموحة له.
- *
- * - من يملك reports.view (admin, accountant) → Dashboard
- * - من يملك stocks.view (storekeeper) → /inventory/stock
- * - من يملك invoices.view (sales_rep, pharmacy) → /sales/invoices
- * - غير ذلك → /not-found (fail-safe)
- */
 function HomeRedirect() {
   const { hasPermission } = useAuth();
 
@@ -132,7 +117,7 @@ function HomeRedirect() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 9. AppRoutes
+// 13. AppRoutes
 // ═══════════════════════════════════════════════════════════
 function AppRoutes() {
   return (
@@ -153,12 +138,10 @@ function AppRoutes() {
           }
         />
 
-        {/* ─── Protected + Layout ───
-            كل ما بداخله يرث Sidebar + Header + ToastContainer */}
+        {/* ─── Protected + Layout ─── */}
         <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-
-          {/* ⚠️ BUG #1 Fix: HomeRedirect بدل Dashboard مباشرة */}
           <Route index element={<HomeRedirect />} />
+
           {/* Phase 1 — Inventory */}
           <Route path="inventory" element={<Inventory />} />
           <Route path="inventory/categories" element={<Categories />} />
@@ -172,7 +155,6 @@ function AppRoutes() {
           <Route path="sales" element={<Sales />} />
           <Route path="sales/invoices" element={<Invoices />} />
           <Route path="sales/invoices/:id" element={<InvoiceDetail />} />
-          {/* ⚠️ 🅱: حُذف route `sales/delivery-notes` */}
           <Route path="sales/customer-returns" element={<CustomerReturns />} />
           <Route path="sales/purchase-receipts" element={<PurchaseReceipts />} />
           <Route path="sales/supplier-returns" element={<SupplierReturns />} />
@@ -181,8 +163,6 @@ function AppRoutes() {
           <Route path="finance" element={<FinancePage />} />
           <Route path="finance/cash-funds" element={<CashFundsPage />} />
           <Route path="finance/bank-accounts" element={<BankAccountsPage />} />
-          {/* ⚠️ 🅲: حُذف route `finance/checks` */}
-          {/* ⚠️ 🅲: حُذف route `finance/checks/:id` */}
           <Route path="finance/cash-transactions" element={<CashTransactionsPage />} />
           <Route path="finance/accounting-entries" element={<AccountingEntriesPage />} />
 
@@ -207,6 +187,17 @@ function AppRoutes() {
               </ProtectedRoute>
             }
           />
+
+          {/* ✅ Phase 5 — AuditLogs (جديد) */}
+          <Route
+            path="audit-logs"
+            element={
+              <ProtectedRoute requiredPermissions={['audit.view']}>
+                <AuditLogsPage />
+              </ProtectedRoute>
+            }
+          />
+
           {/* Phase D — Settings */}
           <Route path="settings" element={<SettingsPage />} />
         </Route>

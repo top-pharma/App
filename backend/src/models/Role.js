@@ -1,11 +1,14 @@
 /**
  * @file Role.js
  * @description
- * نموذج الدور (Role) — 6 أدوار + 62 صلاحية دقيقة.
+ * نموذج الدور (Role) — 6 أدوار + 67 صلاحية دقيقة.
  *
- * ✅ v10.2 (2026-11-13):
- * - توحيد صلاحية سجل التدقيق: audit_logs.view → audit.view
- *   (متسق مع auditLogRoutes.js + Sidebar.jsx + AppRoutes.jsx).
+ * ✅ v10.9 (2026-11-16):
+ * - إضافة 5 صلاحيات sales_rep_transactions.* (view, create, approve, pay, cancel).
+ * - admin: كل الصلاحيات.
+ * - accountant: كل sales_rep_transactions.*
+ * - sales_rep: view فقط (ليرى حركاته).
+ * - hr_manager / storekeeper / pharmacy: لا.
  */
 
 import mongoose from 'mongoose';
@@ -13,7 +16,7 @@ import mongoose from 'mongoose';
 const { Schema, model } = mongoose;
 
 /**
- * جميع الصلاحيات المعروفة في النظام (62 صلاحية).
+ * جميع الصلاحيات المعروفة في النظام (67 صلاحية).
  */
 export const ALL_PERMISSIONS = Object.freeze([
   // ─── المستخدمون (5) ───
@@ -57,7 +60,6 @@ export const ALL_PERMISSIONS = Object.freeze([
   'settings.view', 'settings.update',
 
   // ─── سجل التدقيق (1) ───
-  // ✅ v10.2: audit_logs.view → audit.view
   'audit.view',
 
   // ─── الإشعارات (2) ───
@@ -72,6 +74,13 @@ export const ALL_PERMISSIONS = Object.freeze([
   'finance.entries.view',
   'finance.entries.manage',
   'finance.transactions.view',
+
+  // ✅ v10.9: حركات المناديب (5)
+  'sales_rep_transactions.view',
+  'sales_rep_transactions.create',
+  'sales_rep_transactions.approve',
+  'sales_rep_transactions.pay',
+  'sales_rep_transactions.cancel',
 ]);
 
 /**
@@ -168,7 +177,7 @@ export const DEFAULT_ROLES = Object.freeze([
   {
     code: 'accountant',
     name: 'محاسب',
-    description: 'المالية + الفواتير + تجاوز الأسعار',
+    description: 'المالية + الفواتير + تجاوز الأسعار + حركات المناديب',
     isSystem: true,
     permissions: [
       'categories.view',
@@ -182,7 +191,6 @@ export const DEFAULT_ROLES = Object.freeze([
       'supplier_returns.view',
       'purchase_receipts.view',
       'settings.view',
-      // ✅ v10.2: audit_logs.view → audit.view
       'audit.view',
       'notifications.view',
       'reports.view', 'reports.export',
@@ -190,6 +198,12 @@ export const DEFAULT_ROLES = Object.freeze([
       'finance.manage',
       'finance.entries.view',
       'finance.transactions.view',
+      // ✅ v10.9: حركات المناديب — كاملة
+      'sales_rep_transactions.view',
+      'sales_rep_transactions.create',
+      'sales_rep_transactions.approve',
+      'sales_rep_transactions.pay',
+      'sales_rep_transactions.cancel',
     ],
   },
   {
@@ -205,7 +219,6 @@ export const DEFAULT_ROLES = Object.freeze([
       'users.reset_password',
       'roles.view',
       'notifications.view',
-      // ✅ v10.2: audit_logs.view → audit.view
       'audit.view',
       'settings.view',
     ],
@@ -222,6 +235,8 @@ export const DEFAULT_ROLES = Object.freeze([
       'invoices.view', 'invoices.create', 'invoices.update',
       'customer_returns.view', 'customer_returns.create',
       'notifications.view',
+      // ✅ v10.9: يرى حركاته فقط
+      'sales_rep_transactions.view',
     ],
   },
   {

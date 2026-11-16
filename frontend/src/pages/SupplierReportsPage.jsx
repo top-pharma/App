@@ -3,18 +3,14 @@
  * @description
  * صفحة تقارير الموردين — 2 تقارير.
  *
- *   1. أرصدة الموردين (balances)
- *   2. كشف حساب مورد (statement) — يتطلب اختيار مورد
+ * ✅ v10.5 (2026-11-15):
+ * - value: s.id || s._id (id من buildSupplierPayload).
+ * - limit: 100 (MAX_LIMIT).
  */
 
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import {
-  Wallet,
-  BookUser,
-  RefreshCw,
-  AlertCircle,
-} from 'lucide-react';
+import { Wallet, BookUser, RefreshCw, AlertCircle } from 'lucide-react';
 
 import KpiCards from '../components/Reports/KpiCards';
 import ExportButtons from '../components/Reports/ExportButtons';
@@ -62,8 +58,8 @@ export default function SupplierReportsPage() {
   useEffect(() => {
     (async () => {
       try {
-        const result = await listSuppliers({ limit: 500 });
-        setSuppliers(result?.items || result?.data?.items || []);
+        const result = await listSuppliers({ limit: 100 });
+        setSuppliers(result?.items || []);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[suppliers]', err);
@@ -136,26 +132,10 @@ export default function SupplierReportsPage() {
 
     if (activeTab === 'balances') {
       const kpis = [
-        {
-          label: 'عدد الموردين',
-          value: data.totals.count,
-          color: 'neutral',
-        },
-        {
-          label: 'إجمالي الموجب',
-          value: `${fmt(data.totals.positive)} SDG`,
-          color: 'orange',
-        },
-        {
-          label: 'إجمالي السالب',
-          value: `${fmt(data.totals.negative)} SDG`,
-          color: 'green',
-        },
-        {
-          label: 'الصافي',
-          value: `${fmt(data.totals.net)} SDG`,
-          color: data.totals.net > 0 ? 'red' : 'green',
-        },
+        { label: 'عدد الموردين', value: data.totals.count, color: 'neutral' },
+        { label: 'إجمالي الموجب', value: `${fmt(data.totals.positive)} SDG`, color: 'orange' },
+        { label: 'إجمالي السالب', value: `${fmt(data.totals.negative)} SDG`, color: 'green' },
+        { label: 'الصافي', value: `${fmt(data.totals.net)} SDG`, color: data.totals.net > 0 ? 'red' : 'green' },
       ];
 
       const columns = [
@@ -167,15 +147,7 @@ export default function SupplierReportsPage() {
           label: 'الرصيد',
           align: 'end',
           render: (r) => (
-            <span
-              className={
-                r.currentBalance > 0
-                  ? 'text-orange-700 font-semibold'
-                  : r.currentBalance < 0
-                    ? 'text-green-700 font-semibold'
-                    : 'text-neutral-500'
-              }
-            >
+            <span className={r.currentBalance > 0 ? 'text-orange-700 font-semibold' : r.currentBalance < 0 ? 'text-green-700 font-semibold' : 'text-neutral-500'}>
               {fmt(r.currentBalance)}
             </span>
           ),
@@ -186,65 +158,31 @@ export default function SupplierReportsPage() {
       return (
         <div className="space-y-4">
           <KpiCards items={kpis} />
-          <Table
-            columns={columns}
-            data={data.lines}
-            emptyMessage="لا يوجد موردون نشطون"
-          />
+          <Table columns={columns} data={data.lines} emptyMessage="لا يوجد موردون نشطون" />
         </div>
       );
     }
 
     if (activeTab === 'statement') {
       const kpis = [
-        {
-          label: 'الرصيد الافتتاحي',
-          value: `${fmt(data.openingBalance)} SDG`,
-          color: 'neutral',
-        },
-        {
-          label: 'إجمالي المدين',
-          value: `${fmt(data.totals.debit)} SDG`,
-          color: 'blue',
-        },
-        {
-          label: 'إجمالي الدائن',
-          value: `${fmt(data.totals.credit)} SDG`,
-          color: 'green',
-        },
-        {
-          label: 'الرصيد الختامي',
-          value: `${fmt(data.closingBalance)} SDG`,
-          color: data.closingBalance > 0 ? 'orange' : 'green',
-        },
+        { label: 'الرصيد الافتتاحي', value: `${fmt(data.openingBalance)} SDG`, color: 'neutral' },
+        { label: 'إجمالي المدين', value: `${fmt(data.totals.debit)} SDG`, color: 'blue' },
+        { label: 'إجمالي الدائن', value: `${fmt(data.totals.credit)} SDG`, color: 'green' },
+        { label: 'الرصيد الختامي', value: `${fmt(data.closingBalance)} SDG`, color: data.closingBalance > 0 ? 'orange' : 'green' },
       ];
 
       const columns = [
         { key: 'dateLabel', label: 'التاريخ', align: 'center' },
         { key: 'typeLabel', label: 'النوع', align: 'center' },
         { key: 'ref', label: 'المرجع', align: 'start' },
-        {
-          key: 'debit',
-          label: 'مدين',
-          align: 'end',
-          render: (r) => fmt(r.debit),
-        },
-        {
-          key: 'credit',
-          label: 'دائن',
-          align: 'end',
-          render: (r) => fmt(r.credit),
-        },
+        { key: 'debit', label: 'مدين', align: 'end', render: (r) => fmt(r.debit) },
+        { key: 'credit', label: 'دائن', align: 'end', render: (r) => fmt(r.credit) },
         {
           key: 'balance',
           label: 'الرصيد',
           align: 'end',
           render: (r) => (
-            <span
-              className={
-                r.balance > 0 ? 'text-orange-700 font-semibold' : 'text-green-700'
-              }
-            >
+            <span className={r.balance > 0 ? 'text-orange-700 font-semibold' : 'text-green-700'}>
               {fmt(r.balance)}
             </span>
           ),
@@ -256,17 +194,11 @@ export default function SupplierReportsPage() {
           <div className="bg-white border border-neutral-200 rounded-xl p-4 shadow-sm">
             <p className="text-sm text-neutral-600">
               المورد: <strong className="text-neutral-900">{data.supplier?.name}</strong>
-              {data.supplier?.code && (
-                <span className="text-neutral-500"> — {data.supplier.code}</span>
-              )}
+              {data.supplier?.code && <span className="text-neutral-500"> — {data.supplier.code}</span>}
             </p>
           </div>
           <KpiCards items={kpis} />
-          <Table
-            columns={columns}
-            data={data.lines}
-            emptyMessage="لا توجد حركات في هذه الفترة"
-          />
+          <Table columns={columns} data={data.lines} emptyMessage="لا توجد حركات في هذه الفترة" />
         </div>
       );
     }
@@ -303,9 +235,7 @@ export default function SupplierReportsPage() {
               type="button"
               onClick={() => setTab(t.key)}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                isActive
-                  ? 'bg-primary-800 text-white shadow-sm'
-                  : 'text-neutral-700 hover:bg-white'
+                isActive ? 'bg-primary-800 text-white shadow-sm' : 'text-neutral-700 hover:bg-white'
               }`}
             >
               <Icon size={14} />
@@ -320,26 +250,16 @@ export default function SupplierReportsPage() {
           {activeTab === 'statement' && (
             <>
               <div className="w-40">
-                <Input
-                  label="من"
-                  type="date"
-                  value={from}
-                  onChange={(e) => setFrom(e.target.value)}
-                />
+                <Input label="من" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
               </div>
               <div className="w-40">
-                <Input
-                  label="إلى"
-                  type="date"
-                  value={to}
-                  onChange={(e) => setTo(e.target.value)}
-                />
+                <Input label="إلى" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
               </div>
               <Select
                 label="المورد"
                 value={supplierId}
                 onChange={(e) => setSupplierId(e.target.value)}
-                options={suppliers.map((s) => ({ value: s._id, label: s.name }))}
+                options={suppliers.map((s) => ({ value: s.id || s._id, label: s.name }))}
                 placeholder="— اختر مورداً —"
                 containerClassName="w-64"
               />
@@ -347,16 +267,8 @@ export default function SupplierReportsPage() {
           )}
 
           <div className="flex gap-2 ms-auto">
-            <Button variant="secondary" size="sm" onClick={handleReset}>
-              إعادة تعيين
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={loadReport}
-              disabled={loading}
-              icon={RefreshCw}
-            >
+            <Button variant="secondary" size="sm" onClick={handleReset}>إعادة تعيين</Button>
+            <Button variant="primary" size="sm" onClick={loadReport} disabled={loading} icon={RefreshCw}>
               {loading ? 'جارٍ...' : 'تحديث'}
             </Button>
           </div>

@@ -68,7 +68,7 @@ const SalesReportsPage = lazy(() => import('../pages/SalesReportsPage.jsx'));
 const CustomerReportsPage = lazy(() => import('../pages/CustomerReportsPage.jsx'));
 const SupplierReportsPage = lazy(() => import('../pages/SupplierReportsPage.jsx'));
 const InventoryReportsPage = lazy(() => import('../pages/InventoryReportsPage.jsx'));
-
+const SalesRepTransactionsPage = lazy(() => import('../pages/SalesRepTransactionsPage.jsx'));
 // ═══════════════════════════════════════════════════════════
 // 7. Phase 5 — Notifications + Backup
 // ═══════════════════════════════════════════════════════════
@@ -158,7 +158,7 @@ function AppRoutes() {
           <Route path="sales/customer-returns" element={<CustomerReturns />} />
           <Route path="sales/purchase-receipts" element={<PurchaseReceipts />} />
           <Route path="sales/supplier-returns" element={<SupplierReturns />} />
-
+          <Route path="sales/rep-transactions" element={<SalesRepTransactionsPage />} />
           {/* Phase 3 — Finance */}
           <Route path="finance" element={<FinancePage />} />
           <Route path="finance/cash-funds" element={<CashFundsPage />} />

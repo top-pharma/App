@@ -2,17 +2,9 @@
  * @file Layout.jsx
  * @description الغلاف الرئيسي للتطبيق (Shell) — يربط Sidebar + Header + Outlet.
  *
- * ✅ (2026-11-10):
- * - إضافة زر "خلف" في Header — يظهر تلقائياً إذا pathname !== '/'.
- * - الزر يستخدم navigate(-1) — يحترم تاريخ المتصفح.
- * - مخفي في Dashboard (لأنها الوجهة).
- *
- * ⚠️ B3 (Phase B): زر "حسابي" يفتح Modal ببيانات المستخدم
- *    بدلاً من الانتقال إلى /settings (غير موجود).
- *
- * ✅ الخيار A (2026-11-09):
- * - إضافة اللوغو (/logo.png) في Header (بجانب "نظام Pharma")
- * - إضافة onError لإخفاء الصورة إن لم توجد
+ * ✅ v10.11 (2026-11-16):
+ * - إضافة useIdleTimeout() — تسجيل خروج تلقائي بعد فترة خمول.
+ *   يقرأ idleTimeoutMinutes من Settings (fallback 30 دقيقة).
  */
 
 import { useEffect, useState } from 'react';
@@ -40,18 +32,12 @@ import Modal from '../UI/Modal.jsx';
 
 import { useAuth } from '../../hooks/useAuth.js';
 import { useToast } from '../../hooks/useToast.js';
+import { useIdleTimeout } from '../../hooks/useIdleTimeout.js';
 
 // ═══════════════════════════════════════════════
 // 1. Header (الترويسة العلوية)
 // ═══════════════════════════════════════════════
 
-/**
- * ترويسة التطبيق العلوية.
- *
- * @param {Object} props
- * @param {Function} props.onMenuClick - يفتح Sidebar على mobile.
- * @returns {JSX.Element}
- */
 function Header({ onMenuClick }) {
   const { user, userName, userRoleAr, logout } = useAuth();
   const { isAdmin, isAccountant } = useAuth();
@@ -106,7 +92,7 @@ function Header({ onMenuClick }) {
       .toUpperCase()
     : '؟';
 
-  // ⚠️ B3: بيانات الملف الشخصي (صفوف موحدة)
+  // ⚠️ B3: بيانات الملف الشخصي
   const profileRows = [
     { icon: Mail, label: 'البريد الإلكتروني', value: user?.email || '—' },
     { icon: Phone, label: 'الهاتف', value: user?.phone || '—' },
@@ -120,7 +106,6 @@ function Header({ onMenuClick }) {
     },
   ];
 
-  // ✅ زر خلف — يظهر فقط إذا لم نكن في Dashboard
   const isDashboard = location.pathname === '/';
   const canGoBack = !isDashboard && window.history.length > 1;
 
@@ -138,7 +123,6 @@ function Header({ onMenuClick }) {
             <Menu size={20} />
           </button>
 
-          {/* ✅ زر خلف — يظهر فقط في الصفحات الفرعية */}
           {canGoBack && (
             <button
               type="button"
@@ -151,7 +135,6 @@ function Header({ onMenuClick }) {
             </button>
           )}
 
-          {/* ✅ الخيار A: اللوغو + النص */}
           <div className="flex items-center gap-2 min-w-0">
             <img
               src="/logo.png"
@@ -170,11 +153,8 @@ function Header({ onMenuClick }) {
 
         {/* ─── اليمين: الإجراءات ─── */}
         <div className="flex items-center gap-2">
-
-          {/* الإشعارات — Phase 5 */}
           <NotificationBell />
 
-          {/* قائمة المستخدم */}
           <div className="relative">
             <button
               type="button"
@@ -212,7 +192,6 @@ function Header({ onMenuClick }) {
                   </p>
                 </div>
 
-                {/* ⚠️ B3: زر "الملف الشخصي" يفتح Modal بدل /settings */}
                 <button
                   type="button"
                   onClick={() => {
@@ -253,7 +232,6 @@ function Header({ onMenuClick }) {
         }
       >
         <div className="space-y-4">
-          {/* Avatar + Role */}
           <div className="flex items-center gap-4 pb-4 border-b border-neutral-200">
             <div className="w-16 h-16 rounded-full bg-primary-800 text-white flex items-center justify-center text-2xl font-bold flex-shrink-0">
               {initials}
@@ -268,7 +246,6 @@ function Header({ onMenuClick }) {
             </div>
           </div>
 
-          {/* البيانات */}
           <div className="space-y-3">
             {profileRows.map(({ icon: Icon, label, value }) => (
               <div
@@ -315,13 +292,12 @@ function Header({ onMenuClick }) {
 // 2. Layout (الغلاف الرئيسي)
 // ═══════════════════════════════════════════════
 
-/**
- * الغلاف الرئيسي.
- * @returns {JSX.Element}
- */
 function Layout() {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const location = useLocation();
+
+  // ✅ v10.11 — تسجيل خروج تلقائي بعد فترة خمول
+  useIdleTimeout();
 
   // إغلاق drawer عند تغيير المسار
   useEffect(() => {
@@ -350,7 +326,7 @@ function Layout() {
         />
       )}
 
-      {/* ─── Sidebar (drawer على mobile، ثابت على desktop) ─── */}
+      {/* ─── Sidebar ─── */}
       <aside
         className={`
           fixed top-0 right-0 z-40 h-screen w-64
@@ -360,7 +336,6 @@ function Layout() {
         `}
         aria-label="القائمة الجانبية"
       >
-        {/* زر إغلاق (mobile فقط) */}
         <button
           type="button"
           onClick={() => setIsMobileOpen(false)}

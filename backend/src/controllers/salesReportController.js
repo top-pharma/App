@@ -1,24 +1,19 @@
 /**
  * @file salesReportController.js
  * @description
- * 7 تقارير مبيعات:
- *   1. الفواتير
- *   2. حسب المندوب
- *   3. حسب الصنف
- *   4. العمولات
- *   5. البونص
- *   6. أداء المناديب (NEW)
- *   7. كشف حساب مندوب (NEW)
+ * 7 تقارير مبيعات.
+ *
+ * ✅ v10.6 (2026-11-15):
+ * - getSalesRepStatement: قراءة Invoice + SalesRepTransaction معاً.
+ *   (السابق: SalesRepTransaction فقط — فارغة).
  */
 
-// ─── Models (default imports) ───
 import Invoice, { INVOICE_STATUSES } from '../models/Invoice.js';
 import CustomerReturn from '../models/CustomerReturn.js';
 import SalesRepTransaction from '../models/SalesRepTransaction.js';
 import User from '../models/User.js';
 import Item from '../models/Item.js';
 
-// ─── Services ───
 import exportService from '../services/exportService.js';
 const { exportToExcel, exportToPdf } = exportService;
 
@@ -34,13 +29,12 @@ import {
   toObjectId,
 } from '../services/reportService.js';
 
-// ─── Utils ───
 import { AppError } from '../middlewares/errorMiddleware.js';
 import { logger } from '../utils/logger.js';
 
-/* ─────────────────────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════
  * Helpers
- * ───────────────────────────────────────────────────────────── */
+ * ═══════════════════════════════════════════════════════════ */
 
 const SALES_REP_TYPE_LABELS = Object.freeze({
   commission: 'عمولة',
@@ -60,28 +54,14 @@ const STATUS_LABELS = {
 };
 
 async function respond({
-  req,
-  res,
-  title,
-  columns,
-  rows,
-  meta,
-  summaryRows = [],
-  jsonData,
+  req, res, title, columns, rows, meta, summaryRows = [], jsonData,
 }) {
   const format = req.query.format;
-  if (!format) {
-    return res.status(200).json({ success: true, data: jsonData });
-  }
+  if (!format) return res.status(200).json({ success: true, data: jsonData });
   try {
     if (format === 'pdf') {
       const buffer = await exportToPdf({
-        title,
-        columns,
-        rows,
-        meta,
-        summaryRows,
-        watermark: 'TOP PHARMA',
+        title, columns, rows, meta, summaryRows, watermark: 'TOP PHARMA',
       });
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader(
@@ -114,9 +94,9 @@ function baseInvoiceMatch(from, to, scope) {
   };
 }
 
-/* ─────────────────────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════
  * 1) الفواتير
- * ───────────────────────────────────────────────────────────── */
+ * ═══════════════════════════════════════════════════════════ */
 
 export async function getInvoicesReport(req, res, next) {
   try {
@@ -161,52 +141,28 @@ export async function getInvoicesReport(req, res, next) {
     const meta = makeExportMeta({ title: 'تقرير الفواتير', from, to });
 
     const rowsForExport = lines.map((l) => [
-      l.invoiceNumber,
-      l.dateLabel,
-      l.pharmacyName,
-      l.salesRepName,
-      l.paymentTypeLabel,
-      l.statusLabel,
-      l.total,
-      l.paid,
-      l.remaining,
+      l.invoiceNumber, l.dateLabel, l.pharmacyName, l.salesRepName,
+      l.paymentTypeLabel, l.statusLabel, l.total, l.paid, l.remaining,
     ]);
 
     return respond({
-      req,
-      res,
-      title: 'تقرير الفواتير',
-      columns: [
-        'الرقم',
-        'التاريخ',
-        'الصيدلية',
-        'المندوب',
-        'الدفع',
-        'الحالة',
-        'الإجمالي',
-        'المدفوع',
-        'المتبقي',
-      ],
+      req, res, title: 'تقرير الفواتير',
+      columns: ['الرقم', 'التاريخ', 'الصيدلية', 'المندوب', 'الدفع', 'الحالة', 'الإجمالي', 'المدفوع', 'المتبقي'],
       rows: rowsForExport,
       meta,
-      summaryRows: [
-        ['', '', '', '', '', 'الإجمالي', totals.total, totals.paid, totals.remaining],
-      ],
+      summaryRows: [['', '', '', '', '', 'الإجمالي', totals.total, totals.paid, totals.remaining]],
       jsonData: {
         period: { from, to },
         filters: { status: req.query.status, paymentType: req.query.paymentType },
-        lines,
-        totals,
+        lines, totals,
       },
     });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 }
 
-/* ─────────────────────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════
  * 2) حسب المندوب
- * ───────────────────────────────────────────────────────────── */
+ * ═══════════════════════════════════════════════════════════ */
 
 export async function getSalesByRepReport(req, res, next) {
   try {
@@ -215,22 +171,8 @@ export async function getSalesByRepReport(req, res, next) {
 
     const results = await Invoice.aggregate([
       { $match: baseInvoiceMatch(from, to, scope) },
-      {
-        $group: {
-          _id: '$salesRep',
-          count: { $sum: 1 },
-          total: { $sum: '$total' },
-          paid: { $sum: '$paidAmount' },
-        },
-      },
-      {
-        $lookup: {
-          from: 'users',
-          localField: '_id',
-          foreignField: '_id',
-          as: 'rep',
-        },
-      },
+      { $group: { _id: '$salesRep', count: { $sum: 1 }, total: { $sum: '$total' }, paid: { $sum: '$paidAmount' } } },
+      { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'rep' } },
       { $unwind: { path: '$rep', preserveNullAndEmptyArrays: true } },
       { $sort: { total: -1 } },
     ]);
@@ -253,33 +195,21 @@ export async function getSalesByRepReport(req, res, next) {
 
     const meta = makeExportMeta({ title: 'المبيعات حسب المندوب', from, to });
 
-    const rowsForExport = lines.map((l) => [
-      l.name,
-      l.email,
-      l.count,
-      l.total,
-      l.avgInvoice,
-      l.paid,
-    ]);
+    const rowsForExport = lines.map((l) => [l.name, l.email, l.count, l.total, l.avgInvoice, l.paid]);
 
     return respond({
-      req,
-      res,
-      title: 'المبيعات حسب المندوب',
+      req, res, title: 'المبيعات حسب المندوب',
       columns: ['المندوب', 'البريد', 'عدد الفواتير', 'الإجمالي', 'متوسط الفاتورة', 'المدفوع'],
-      rows: rowsForExport,
-      meta,
+      rows: rowsForExport, meta,
       summaryRows: [['الإجمالي', '', totals.count, totals.total, '', totals.paid]],
       jsonData: { period: { from, to }, lines, totals },
     });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 }
 
-/* ─────────────────────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════
  * 3) حسب الصنف
- * ───────────────────────────────────────────────────────────── */
+ * ═══════════════════════════════════════════════════════════ */
 
 export async function getSalesByItemReport(req, res, next) {
   try {
@@ -294,29 +224,18 @@ export async function getSalesByItemReport(req, res, next) {
           _id: '$items.item',
           quantity: { $sum: '$items.quantity' },
           total: { $sum: '$items.total' },
-          cost: {
-            $sum: { $multiply: ['$items.quantity', { $ifNull: ['$items.unitCost', 0] }] },
-          },
+          cost: { $sum: { $multiply: ['$items.quantity', { $ifNull: ['$items.unitCost', 0] }] } },
           invoicesCount: { $addToSet: '$_id' },
         },
       },
-      {
-        $lookup: {
-          from: 'items',
-          localField: '_id',
-          foreignField: '_id',
-          as: 'item',
-        },
-      },
+      { $lookup: { from: 'items', localField: '_id', foreignField: '_id', as: 'item' } },
       { $unwind: { path: '$item', preserveNullAndEmptyArrays: true } },
       {
         $project: {
           itemId: '$_id',
           tradeName: '$item.tradeName',
           scientificName: '$item.scientificName',
-          quantity: 1,
-          total: 1,
-          cost: 1,
+          quantity: 1, total: 1, cost: 1,
           profit: { $subtract: ['$total', '$cost'] },
           invoicesCount: { $size: '$invoicesCount' },
         },
@@ -345,33 +264,22 @@ export async function getSalesByItemReport(req, res, next) {
     const meta = makeExportMeta({ title: 'المبيعات حسب الصنف', from, to });
 
     const rowsForExport = lines.map((l) => [
-      l.tradeName,
-      l.scientificName,
-      l.quantity,
-      l.total,
-      l.cost,
-      l.profit,
-      `${l.marginPercent.toFixed(2)}%`,
+      l.tradeName, l.scientificName, l.quantity, l.total, l.cost, l.profit, `${l.marginPercent.toFixed(2)}%`,
     ]);
 
     return respond({
-      req,
-      res,
-      title: 'المبيعات حسب الصنف',
+      req, res, title: 'المبيعات حسب الصنف',
       columns: ['الصنف', 'الاسم العلمي', 'الكمية', 'الإجمالي', 'التكلفة', 'الربح', 'الهامش %'],
-      rows: rowsForExport,
-      meta,
+      rows: rowsForExport, meta,
       summaryRows: [['الإجمالي', '', totals.quantity, totals.total, '', totals.profit, '']],
       jsonData: { period: { from, to }, lines, totals },
     });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 }
 
-/* ─────────────────────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════
  * 4) العمولات
- * ───────────────────────────────────────────────────────────── */
+ * ═══════════════════════════════════════════════════════════ */
 
 export async function getCommissionsReport(req, res, next) {
   try {
@@ -412,32 +320,22 @@ export async function getCommissionsReport(req, res, next) {
     const meta = makeExportMeta({ title: 'تقرير العمولات', from, to });
 
     const rowsForExport = lines.map((l) => [
-      l.transactionNumber,
-      l.dateLabel,
-      l.salesRepName,
-      l.invoiceNumber,
-      l.invoiceTotal,
-      l.amount,
+      l.transactionNumber, l.dateLabel, l.salesRepName, l.invoiceNumber, l.invoiceTotal, l.amount,
     ]);
 
     return respond({
-      req,
-      res,
-      title: 'تقرير العمولات',
+      req, res, title: 'تقرير العمولات',
       columns: ['رقم الحركة', 'التاريخ', 'المندوب', 'الفاتورة', 'قيمة الفاتورة', 'العمولة'],
-      rows: rowsForExport,
-      meta,
+      rows: rowsForExport, meta,
       summaryRows: [['', '', 'الإجمالي', '', totals.invoiceTotal, totals.total]],
       jsonData: { period: { from, to }, lines, totals },
     });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 }
 
-/* ─────────────────────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════
  * 5) البونص
- * ───────────────────────────────────────────────────────────── */
+ * ═══════════════════════════════════════════════════════════ */
 
 export async function getDiscountsReport(req, res, next) {
   try {
@@ -477,41 +375,29 @@ export async function getDiscountsReport(req, res, next) {
     const meta = makeExportMeta({ title: 'البونص والخصومات', from, to });
 
     const rowsForExport = lines.map((l) => [
-      l.invoiceNumber,
-      l.dateLabel,
-      l.pharmacyName,
-      l.salesRepName,
-      l.discountType,
-      l.discountValue,
-      l.discountAmount,
-      l.reason,
+      l.invoiceNumber, l.dateLabel, l.pharmacyName, l.salesRepName,
+      l.discountType, l.discountValue, l.discountAmount, l.reason,
     ]);
 
     return respond({
-      req,
-      res,
-      title: 'البونص والخصومات',
+      req, res, title: 'البونص والخصومات',
       columns: ['الفاتورة', 'التاريخ', 'الصيدلية', 'المندوب', 'النوع', 'القيمة', 'المبلغ المخصوم', 'السبب'],
-      rows: rowsForExport,
-      meta,
+      rows: rowsForExport, meta,
       summaryRows: [['', '', '', '', '', '', totals.amount, '']],
       jsonData: { period: { from, to }, lines, totals },
     });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 }
 
-/* ─────────────────────────────────────────────────────────────
- * 6) أداء المناديب (NEW)
- * ───────────────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════
+ * 6) أداء المناديب
+ * ═══════════════════════════════════════════════════════════ */
 
 export async function getRepsPerformanceReport(req, res, next) {
   try {
     const { from, to } = validateRange(req.query.from, req.query.to);
     const scope = buildScope(req);
 
-    // 1. المبيعات
     const salesAgg = await Invoice.aggregate([
       { $match: baseInvoiceMatch(from, to, scope) },
       {
@@ -524,14 +410,12 @@ export async function getRepsPerformanceReport(req, res, next) {
       },
     ]);
 
-    // 2. عدد الأصناف
     const itemsAgg = await Invoice.aggregate([
       { $match: baseInvoiceMatch(from, to, scope) },
       { $unwind: '$items' },
       { $group: { _id: '$salesRep', itemsCount: { $sum: 1 } } },
     ]);
 
-    // 3. العمولات
     const commAgg = await SalesRepTransaction.aggregate([
       {
         $match: {
@@ -549,25 +433,18 @@ export async function getRepsPerformanceReport(req, res, next) {
       },
     ]);
 
-    // 4. قائمة المناديب النشطين
     const users = await User.find({ role: 'sales_rep', isActive: true })
-      .select('name email')
-      .lean();
+      .select('name email').lean();
 
-    // 5. خرائط
     const salesMap = new Map(salesAgg.map((r) => [String(r._id), r]));
     const itemsMap = new Map(itemsAgg.map((r) => [String(r._id), r]));
     const commMap = new Map(commAgg.map((r) => [String(r._id), r]));
 
-    // 6. بناء الصفوف
     const lines = users.map((u) => {
       const id = String(u._id);
       const sales = salesMap.get(id) || { invoicesCount: 0, totalSales: 0, totalPaid: 0 };
       const items = itemsMap.get(id) || { itemsCount: 0 };
       const comm = commMap.get(id) || { totalCommissions: 0, commissionsCount: 0 };
-
-      const avgInvoice =
-        sales.invoicesCount > 0 ? round2(sales.totalSales / sales.invoicesCount) : 0;
 
       return {
         salesRepId: u._id,
@@ -577,7 +454,7 @@ export async function getRepsPerformanceReport(req, res, next) {
         totalSales: round2(sales.totalSales),
         totalPaid: round2(sales.totalPaid),
         remaining: round2(sales.totalSales - sales.totalPaid),
-        avgInvoice,
+        avgInvoice: sales.invoicesCount > 0 ? round2(sales.totalSales / sales.invoicesCount) : 0,
         itemsCount: items.itemsCount,
         totalCommissions: round2(comm.totalCommissions),
         commissionsCount: comm.commissionsCount,
@@ -598,57 +475,26 @@ export async function getRepsPerformanceReport(req, res, next) {
     const meta = makeExportMeta({ title: 'أداء المناديب', from, to });
 
     const rowsForExport = lines.map((l) => [
-      l.name,
-      l.email,
-      l.invoicesCount,
-      l.totalSales,
-      l.avgInvoice,
-      l.totalPaid,
-      l.remaining,
-      l.itemsCount,
-      l.totalCommissions,
+      l.name, l.email, l.invoicesCount, l.totalSales, l.avgInvoice,
+      l.totalPaid, l.remaining, l.itemsCount, l.totalCommissions,
     ]);
 
     return respond({
-      req,
-      res,
-      title: 'أداء المناديب',
-      columns: [
-        'المندوب',
-        'البريد',
-        'الفواتير',
-        'إجمالي المبيعات',
-        'متوسط الفاتورة',
-        'المحصّل',
-        'المتبقي',
-        'عدد الأصناف',
-        'العمولات',
-      ],
-      rows: rowsForExport,
-      meta,
-      summaryRows: [
-        [
-          'الإجمالي',
-          '',
-          totals.invoicesCount,
-          totals.totalSales,
-          '',
-          totals.totalPaid,
-          '',
-          totals.itemsCount,
-          totals.totalCommissions,
-        ],
-      ],
+      req, res, title: 'أداء المناديب',
+      columns: ['المندوب', 'البريد', 'الفواتير', 'إجمالي المبيعات', 'متوسط الفاتورة', 'المحصّل', 'المتبقي', 'عدد الأصناف', 'العمولات'],
+      rows: rowsForExport, meta,
+      summaryRows: [[
+        'الإجمالي', '', totals.invoicesCount, totals.totalSales, '',
+        totals.totalPaid, '', totals.itemsCount, totals.totalCommissions,
+      ]],
       jsonData: { period: { from, to }, lines, totals },
     });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 }
 
-/* ─────────────────────────────────────────────────────────────
- * 7) كشف حساب مندوب (NEW)
- * ───────────────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════
+ * 7) كشف حساب مندوب (✅ v10.6 — Invoice + SalesRepTransaction)
+ * ═══════════════════════════════════════════════════════════ */
 
 export async function getSalesRepStatement(req, res, next) {
   try {
@@ -659,7 +505,6 @@ export async function getSalesRepStatement(req, res, next) {
       throw new AppError('salesRepId غير صالح.', 400, 'INVALID_ID');
     }
 
-    // scope: مندوب يرى كشفه فقط
     if (
       req.user.role === 'sales_rep' &&
       String(req.user._id) !== String(salesRepId)
@@ -673,7 +518,7 @@ export async function getSalesRepStatement(req, res, next) {
       throw new AppError('المندوب غير موجود.', 404, 'SALES_REP_NOT_FOUND');
     }
 
-    // الرصيد الافتتاحي
+    // ✅ v10.6: الرصيد الافتتاحي — SalesRepTransaction فقط (قبل from)
     const before = await SalesRepTransaction.aggregate([
       {
         $match: {
@@ -693,7 +538,17 @@ export async function getSalesRepStatement(req, res, next) {
 
     const openingBalance = round2((before[0]?.credit || 0) - (before[0]?.debit || 0));
 
-    // الحركات في الفترة
+    // ✅ v10.6: 1. فواتير المندوب (debit — استلم بضاعة)
+    const invoices = await Invoice.find({
+      salesRep: repIdObj,
+      invoiceDate: { $gte: from, $lte: to },
+      status: { $nin: [INVOICE_STATUSES.DRAFT, INVOICE_STATUSES.CANCELLED] },
+    })
+      .populate('pharmacy', 'name')
+      .sort({ invoiceDate: 1 })
+      .lean();
+
+    // ✅ v10.6: 2. SalesRepTransaction (عمولات، سلف، إلخ)
     const txs = await SalesRepTransaction.find({
       salesRep: repIdObj,
       transactionDate: { $gte: from, $lte: to },
@@ -702,14 +557,27 @@ export async function getSalesRepStatement(req, res, next) {
       .sort({ transactionDate: 1, createdAt: 1 })
       .lean();
 
-    let running = openingBalance;
-    const lines = txs.map((t) => {
-      const credit = t.direction === 'credit' ? round2(t.amount) : 0;
-      const debit = t.direction === 'debit' ? round2(t.amount) : 0;
-      running = round2(running + credit - debit);
-      return {
-        _id: t._id,
-        transactionNumber: t.transactionNumber,
+    // ✅ v10.6: دمج الحركات
+    const movements = [
+      // فواتير — debit (عليه)
+      ...invoices.map((inv) => ({
+        date: inv.invoiceDate,
+        dateLabel: formatDate(inv.invoiceDate),
+        type: 'invoice',
+        typeLabel: 'فاتورة',
+        direction: 'debit',
+        directionLabel: 'عليه',
+        amount: round2(inv.total),
+        credit: 0,
+        debit: round2(inv.total),
+        status: inv.status,
+        statusLabel: INVOICE_STATUS_LABELS[inv.status] || inv.status,
+        description: `فاتورة ${inv.invoiceNumber} — ${inv.pharmacy?.name || ''}`,
+        ref: inv.invoiceNumber,
+        _id: inv._id,
+      })),
+      // SalesRepTransaction — credit/debit حسب direction
+      ...txs.map((t) => ({
         date: t.transactionDate,
         dateLabel: formatDate(t.transactionDate),
         type: t.type,
@@ -717,13 +585,20 @@ export async function getSalesRepStatement(req, res, next) {
         direction: t.direction,
         directionLabel: DIRECTION_LABELS[t.direction] || t.direction,
         amount: round2(t.amount),
-        credit,
-        debit,
-        balance: running,
+        credit: t.direction === 'credit' ? round2(t.amount) : 0,
+        debit: t.direction === 'debit' ? round2(t.amount) : 0,
         status: t.status,
         statusLabel: STATUS_LABELS[t.status] || t.status,
         description: t.description || '',
-      };
+        ref: t.transactionNumber,
+        _id: t._id,
+      })),
+    ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    let running = openingBalance;
+    const lines = movements.map((m) => {
+      running = round2(running + m.credit - m.debit);
+      return { ...m, balance: running };
     });
 
     const closingBalance = round2(running);
@@ -732,30 +607,19 @@ export async function getSalesRepStatement(req, res, next) {
 
     const meta = makeExportMeta({
       title: `كشف حساب مندوب — ${rep.name}`,
-      from,
-      to,
+      from, to,
     });
 
     const rowsForExport = [
       ['رصيد افتتاحي', '', '', '', '', openingBalance],
-      ...lines.map((l) => [
-        l.dateLabel,
-        l.typeLabel,
-        l.directionLabel,
-        l.amount,
-        l.statusLabel,
-        l.balance,
-      ]),
+      ...lines.map((l) => [l.dateLabel, l.typeLabel, l.directionLabel, l.amount, l.statusLabel, l.balance]),
       ['رصيد ختامي', '', '', '', '', closingBalance],
     ];
 
     return respond({
-      req,
-      res,
-      title: `كشف حساب مندوب — ${rep.name}`,
+      req, res, title: `كشف حساب مندوب — ${rep.name}`,
       columns: ['التاريخ', 'النوع', 'الاتجاه', 'المبلغ', 'الحالة', 'الرصيد'],
-      rows: rowsForExport,
-      meta,
+      rows: rowsForExport, meta,
       summaryRows: [],
       jsonData: {
         salesRep: {
@@ -767,22 +631,15 @@ export async function getSalesRepStatement(req, res, next) {
           isActive: rep.isActive,
         },
         period: { from, to },
-        openingBalance,
-        closingBalance,
-        totalCredit,
-        totalDebit,
-        lines,
-        count: lines.length,
+        openingBalance, closingBalance, totalCredit, totalDebit, totals: {
+          credit: totalCredit,
+          debit: totalDebit,
+        },
+        lines, count: lines.length,
       },
     });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 }
-
-/* ─────────────────────────────────────────────────────────────
- * Default Export — 7 دوال
- * ───────────────────────────────────────────────────────────── */
 
 export default {
   getInvoicesReport,

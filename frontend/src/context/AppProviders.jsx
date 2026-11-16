@@ -7,15 +7,8 @@
  * ⚠️ قاعدة الترتيب:
  *   ToastProvider (الأبعد) → AuthProvider → NotificationsProvider → باقي Providers
  *
- *   - AuthProvider يحتاج useToast ✓ (ToastProvider خارجه)
- *   - NotificationsProvider يحتاج useAuth + useToast ✓ (كلاهما خارجه)
- *   - باقي الـ Providers تحتاج Auth + Toast + Notifications ✓
- *
- * ✅ 🅱 (2026-11-08):
- * - حُذف DeliveryNotesProvider.
- *
- * ✅ 🅲 (2026-11-08):
- * - حُذف ChecksProvider (Check أُلغي).
+ * ✅ v10.9 (2026-11-16):
+ * - إضافة SalesRepTransactionsProvider (داخل InvoicesProvider).
  */
 
 // ─── Phase 0 ───
@@ -35,19 +28,19 @@ import { StockProvider } from './StockContext.jsx';
 
 // ─── Phase 2 ───
 import { InvoicesProvider } from './InvoicesContext.jsx';
-// ⚠️ 🅱: حُذف import DeliveryNotesProvider
 import { CustomerReturnsProvider } from './CustomerReturnsContext.jsx';
 
 // ─── Phase 3 ───
 import { CashFundsProvider } from './CashFundsContext.jsx';
 import { BankAccountsProvider } from './BankAccountsContext.jsx';
-// ⚠️ 🅲: حُذف import ChecksProvider
+
+// ✅ v10.9 — حركات المناديب
+import { SalesRepTransactionsProvider } from './SalesRepTransactionsContext.jsx';
 
 export const AppProviders = ({ children }) => {
   return (
     <ToastProvider>
       <AuthProvider>
-        {/* ✅ Phase 5 — داخل Auth + Toast */}
         <NotificationsProvider>
           <CategoriesProvider>
             <WarehousesProvider>
@@ -56,16 +49,15 @@ export const AppProviders = ({ children }) => {
                   <CustomersProvider>
                     <StockProvider>
                       <InvoicesProvider>
-                        {/* ⚠️ 🅱: حُذف <DeliveryNotesProvider> */}
-                        <CustomerReturnsProvider>
-                          {/* ── Phase 3 Providers ── */}
-                          <CashFundsProvider>
-                            <BankAccountsProvider>
-                              {/* ⚠️ 🅲: حُذف <ChecksProvider> */}
-                              {children}
-                            </BankAccountsProvider>
-                          </CashFundsProvider>
-                        </CustomerReturnsProvider>
+                        <SalesRepTransactionsProvider>  {/* ✅ v10.9 */}
+                          <CustomerReturnsProvider>
+                            <CashFundsProvider>
+                              <BankAccountsProvider>
+                                {children}
+                              </BankAccountsProvider>
+                            </CashFundsProvider>
+                          </CustomerReturnsProvider>
+                        </SalesRepTransactionsProvider>
                       </InvoicesProvider>
                     </StockProvider>
                   </CustomersProvider>

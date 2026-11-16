@@ -1,10 +1,10 @@
 /**
  * @file Sidebar.jsx
- * @description القائمة الجانبية — Phase D (RBAC كامل) + AuditLogs.
+ * @description القائمة الجانبية — Phase D (RBAC كامل) + AuditLogs + حركات المناديب.
  *
- * ⚠️ إصلاح 2026-11-12:
- * - F1: إضافة رابط "سجل التدقيق" — بصلاحية `audit.view`.
- * - F2: إضافة `ScrollText` (موجود) — `FileText` (موجود).
+ * ✅ v10.9 (2026-11-16):
+ * - إضافة رابط "حركات المناديب" — بصلاحية `sales_rep_transactions.view`.
+ * - إضافة `DollarSign` من lucide-react.
  */
 
 import { useState } from 'react';
@@ -35,6 +35,7 @@ import {
   UserCog,
   Database,
   Settings,
+  DollarSign,  // ✅ v10.9 — جديد
 } from 'lucide-react';
 
 import { useAuth } from '../../hooks/useAuth.js';
@@ -128,6 +129,7 @@ function Sidebar() {
   const canViewSales = canAny([
     'invoices.view',
     'customer_returns.view',
+    'sales_rep_transactions.view',  // ✅ v10.9
   ]);
 
   const canViewPurchases = canAny([
@@ -144,7 +146,7 @@ function Sidebar() {
   const canViewReports = hasPermission('reports.view');
   const canViewDashboard = hasPermission('reports.view');
   const canViewUsers = hasPermission('users.view');
-  const canViewAuditLogs = hasPermission('audit.view');  // ✅ جديد
+  const canViewAuditLogs = hasPermission('audit.view');
   const canViewBackup = hasPermission('settings.update');
 
   // ─── الروابط الخاصة ───
@@ -209,6 +211,10 @@ function Sidebar() {
             )}
             {hasPermission('customer_returns.view') && (
               <SidebarLink to="/sales/customer-returns" icon={Undo2} label="مرتجعات العملاء" />
+            )}
+            {/* ✅ v10.9 — جديد */}
+            {hasPermission('sales_rep_transactions.view') && (
+              <SidebarLink to="/sales/rep-transactions" icon={DollarSign} label="حركات المناديب" />
             )}
           </SidebarGroup>
         )}
@@ -288,7 +294,7 @@ function Sidebar() {
           <SidebarLink to="/users" icon={UserCog} label="المستخدمون والموظفون" />
         )}
 
-        {/* ✅ سجل التدقيق — جديد */}
+        {/* سجل التدقيق */}
         {canViewAuditLogs && (
           <SidebarLink to="/audit-logs" icon={ScrollText} label="سجل التدقيق" />
         )}

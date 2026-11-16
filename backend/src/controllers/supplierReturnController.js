@@ -2,14 +2,10 @@
  * @file supplierReturnController.js
  * @description
  * واجهات التحكم لمرتجعات الموردين.
- * تدير دورة حياة المرتجع (مسودة ← مُرسل ← مقبول/مرفوض) مع تعديل المخزون.
  *
- * لماذا هذا الملف؟
- * - مرتجع المورد يعني إخراج بضاعة تالفة/قريبة الانتهاء من مخزننا وإعادتها للشركة.
- * - التأثير الفعلي على المخزون يحدث عند القبول (Accept) وليس الإرسال.
- * - عند القبول بطريقة "إشعار دائن" (Credit Note)، يُخصم المبلغ من رصيد المورد.
- * - عند القبول بطريقة "استبدال" (Replacement)، نطلب رقم مرجعي للبضاعة البديلة.
- * - لا يوجد Scope خاص (متاح فقط لـ admin / accountant / storekeeper).
+ * ✅ v10.4 (2026-11-15):
+ * - CASH_REFUND: إضافة CashTransaction (direction: 'in') + cashFund إلزامي.
+ * - استيراد cashService.
  */
 
 import { AUDIT_ACTIONS } from '../models/AuditLog.js';
@@ -23,6 +19,7 @@ import { PurchaseReceipt } from '../models/PurchaseReceipt.js';
 import { Stock } from '../models/Stock.js';
 import { Warehouse } from '../models/Warehouse.js';
 import { Settings } from '../models/Settings.js';
+import cashService from '../services/cashService.js';
 import { AppError, asyncHandler } from '../middlewares/errorMiddleware.js';
 import { logAuditEvent } from '../middlewares/auditLogMiddleware.js';
 import { logger } from '../utils/logger.js';
@@ -31,13 +28,6 @@ import { logger } from '../utils/logger.js';
 // Helpers
 // ============================================================
 
-/**
- * توليد رقم مرتجع مورد فريد.
- * النمط: SRET-YYYYMMDD-XXXX
- *
- * @async
- * @returns {Promise<string>}
- */
 async function generateSupplierReturnNumber() {
   const settings = await Settings.getSettings();
   const prefix = settings.sales?.prefixes?.supplierReturn || 'SRET';
@@ -59,9 +49,6 @@ async function generateSupplierReturnNumber() {
   return `${prefix}-${dateStr}-${String(sequence).padStart(4, '0')}`;
 }
 
-/**
- * بناء استجابة موحّدة.
- */
 const buildSupplierReturnPayload = (ret) => ({
   id: ret._id,
   returnNumber: ret.returnNumber,
@@ -84,9 +71,6 @@ const buildSupplierReturnPayload = (ret) => ({
 // 1) القراءة
 // ============================================================
 
-/**
- * GET /api/supplier-returns
- */
 export const listSupplierReturns = asyncHandler(async (req, res) => {
   const {
     page,
@@ -154,9 +138,6 @@ export const listSupplierReturns = asyncHandler(async (req, res) => {
   });
 });
 
-/**
- * GET /api/supplier-returns/:id
- */
 export const getSupplierReturn = asyncHandler(async (req, res) => {
   const ret = await SupplierReturn.findById(req.params.id)
     .populate('supplier', 'name code phone currentBalance')
@@ -177,21 +158,14 @@ export const getSupplierReturn = asyncHandler(async (req, res) => {
 // 2) الإنشاء
 // ============================================================
 
-/**
- * POST /api/supplier-returns
- *
- * ملاحظة: الإنشاء لا يؤثر على المخزون (الحالة draft).
- */
 export const createSupplierReturn = asyncHandler(async (req, res) => {
   const data = req.body;
 
-  // 1. التحقق من المورد
   const supplier = await Supplier.findById(data.supplier);
   if (!supplier) {
     throw new AppError('المورّد غير موجود.', 404, 'SUPPLIER_NOT_FOUND');
   }
 
-  // 2. التحقق من إيصال الاستلام (إن وُجد)
   if (data.purchaseReceipt) {
     const receipt = await PurchaseReceipt.findById(data.purchaseReceipt);
     if (!receipt) {
@@ -202,7 +176,6 @@ export const createSupplierReturn = asyncHandler(async (req, res) => {
     }
   }
 
-  // 3. إنشاء المرتجع
   const returnNumber = await generateSupplierReturnNumber();
 
   const supplierReturn = await SupplierReturn.create({
@@ -240,9 +213,6 @@ export const createSupplierReturn = asyncHandler(async (req, res) => {
 // 3) التعديل (مسودة فقط)
 // ============================================================
 
-/**
- * PATCH /api/supplier-returns/:id
- */
 export const updateSupplierReturn = asyncHandler(async (req, res) => {
   const ret = await SupplierReturn.findById(req.params.id);
 
@@ -287,12 +257,9 @@ export const updateSupplierReturn = asyncHandler(async (req, res) => {
 });
 
 // ============================================================
-// 4) الإرسال (Send to Supplier)
+// 4) الإرسال
 // ============================================================
 
-/**
- * POST /api/supplier-returns/:id/send
- */
 export const sendSupplierReturn = asyncHandler(async (req, res) => {
   const ret = await SupplierReturn.findById(req.params.id);
 
@@ -326,18 +293,11 @@ export const sendSupplierReturn = asyncHandler(async (req, res) => {
 });
 
 // ============================================================
-// 5) القبول (Accept from Supplier)
+// 5) القبول
 // ============================================================
 
-/**
- * POST /api/supplier-returns/:id/accept
- *
- * التأثير الفعلي:
- * 1. خصم البضاعة من المخزون (لأنها ستُشحن للمورد).
- * 2. تسوية مالية (إشعار دائن / استرداد / استبدال).
- */
 export const acceptSupplierReturn = asyncHandler(async (req, res) => {
-  const { settledAmount, replacementReference, notes } = req.body;
+  const { settledAmount, replacementReference, cashFund, notes } = req.body;
   const returnId = req.params.id;
 
   const supplierReturn = await SupplierReturn.findById(returnId);
@@ -354,7 +314,6 @@ export const acceptSupplierReturn = asyncHandler(async (req, res) => {
   }
 
   // 1. خصم البضاعة من المخزون
-  // نحتاج معرفة المخزن (من إيصال الاستلام المرتبط)
   if (!supplierReturn.purchaseReceipt) {
     throw new AppError('يجب ربط المرتجع بإيصال استلام لمعرفة المخزن.', 400, 'NO_RECEIPT');
   }
@@ -396,7 +355,6 @@ export const acceptSupplierReturn = asyncHandler(async (req, res) => {
     }
   } catch (error) {
     logger.error(`فشل خصم المخزون في مرتجع المورد: ${error.message}. جارٍ Rollback...`);
-    // Rollback: إعادة البضاعة
     for (const log of stockDeductionLog) {
       try {
         // eslint-disable-next-line no-await-in-loop
@@ -417,7 +375,6 @@ export const acceptSupplierReturn = asyncHandler(async (req, res) => {
       throw new AppError('يجب تحديد مبلغ التسوية (إشعار دائن).', 400, 'INVALID_SETTLED_AMOUNT');
     }
 
-    // إشعار دائن يخصم من رصيد المورد
     await Supplier.updateOne(
       { _id: supplierReturn.supplier },
       { $inc: { currentBalance: -settledAmount } }
@@ -426,13 +383,44 @@ export const acceptSupplierReturn = asyncHandler(async (req, res) => {
     if (!replacementReference) {
       throw new AppError('يجب إدخال رقم مرجعي للاستبدال.', 400, 'NO_REPLACEMENT_REF');
     }
-    // لا تأثير مالي (البضاعة ستُستبدل)
   } else if (supplierReturn.settlementType === SUPPLIER_SETTLEMENT_TYPES.CASH_REFUND) {
     if (!settledAmount || settledAmount <= 0) {
       throw new AppError('يجب تحديد مبلغ الاسترداد النقدي.', 400, 'INVALID_SETTLED_AMOUNT');
     }
-    // استرداد نقدي (دخول للخزينة) - يتم تسجيله كحركة نقدية
-    // ملاحظة: CashFund يتم تحديده يدوياً من المحاسب في مرحلة لاحقة
+    // ✅ v10.4: إنشاء CashTransaction (direction: 'in')
+    if (!cashFund) {
+      throw new AppError('يجب تحديد الصندوق النقدي للاسترداد.', 400, 'NO_CASH_FUND');
+    }
+
+    try {
+      await cashService.createCashTransaction({
+        direction: 'in',
+        amount: settledAmount,
+        method: 'cash',
+        cashFundId: cashFund,
+        transactionDate: new Date(),
+        description: `استرداد نقدي من المورد — مرتجع ${supplierReturn.returnNumber}`,
+        referenceType: 'supplier_return',
+        referenceId: supplierReturn._id,
+        user: req.user,
+        skipEntry: true, // سننشئ القيد يدوياً إن لزم — أو نتركه skipEntry
+      });
+    } catch (cashErr) {
+      // Rollback المخزون
+      logger.error(`فشل إنشاء CashTransaction للاسترداد: ${cashErr.message}. Rollback...`);
+      for (const log of stockDeductionLog) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await Stock.updateOne(
+            { _id: log.stockId },
+            { $inc: { quantity: log.quantity } }
+          );
+        } catch (rbErr) {
+          logger.error(`فشل Rollback للدفعة ${log.batch}: ${rbErr.message}`);
+        }
+      }
+      throw cashErr;
+    }
   }
 
   // 3. تحديث المرتجع
@@ -465,12 +453,9 @@ export const acceptSupplierReturn = asyncHandler(async (req, res) => {
 });
 
 // ============================================================
-// 6) الرفض (Reject from Supplier)
+// 6) الرفض
 // ============================================================
 
-/**
- * POST /api/supplier-returns/:id/reject
- */
 export const rejectSupplierReturn = asyncHandler(async (req, res) => {
   const { rejectionReason } = req.body;
   const returnId = req.params.id;
@@ -509,10 +494,6 @@ export const rejectSupplierReturn = asyncHandler(async (req, res) => {
     message: 'تم رفض المرتجع من المورّد.',
   });
 });
-
-// ============================================================
-// تصدير موحّد
-// ============================================================
 
 export default {
   listSupplierReturns,

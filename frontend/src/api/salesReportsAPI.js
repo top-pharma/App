@@ -1,5 +1,10 @@
 /**
- * @file salesReportsAPI.js — Phase 4 + Sales Rep Statement
+ * @file salesReportsAPI.js
+ * @description تقارير المبيعات — Phase 4.
+ *
+ * ✅ v10.5 (2026-11-15):
+ * - getSalesRepStatement: /statement → /sales-rep-statement (مطابق للـ backend).
+ * - exportSalesReport: statement → /sales-rep-statement.
  */
 
 import axiosInstance from './axiosInstance.js';
@@ -31,15 +36,11 @@ export async function getDiscounts(params) {
 
 export async function getSalesRepStatement(salesRepId, params = {}) {
   const { data } = await axiosInstance.get(
-    `/reports/sales/statement/${salesRepId}`,
+    `/reports/sales/sales-rep-statement/${salesRepId}`,  // ✅ v10.5
     { params }
   );
   return data.data;
 }
-
-/* ─────────────────────────────────────────────────────────────
- * التصدير
- * ───────────────────────────────────────────────────────────── */
 
 const PATHS = Object.freeze({
   invoices: '/reports/sales/invoices',
@@ -47,14 +48,13 @@ const PATHS = Object.freeze({
   'by-item': '/reports/sales/by-item',
   commissions: '/reports/sales/commissions',
   discounts: '/reports/sales/discounts',
-  // 'statement' handled specially (needs ID interpolation)
 });
 
 export async function exportSalesReport(reportName, format, params = {}) {
   let path;
   if (reportName === 'statement') {
     if (!params.salesRepId) throw new Error('salesRepId مطلوب');
-    path = `/reports/sales/statement/${params.salesRepId}`;
+    path = `/reports/sales/sales-rep-statement/${params.salesRepId}`;  // ✅ v10.5
   } else {
     path = PATHS[reportName];
   }

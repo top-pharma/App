@@ -112,7 +112,7 @@ export const login = asyncHandler(async (req, res) => {
   const isMatch = await verifyPassword(password, user.password);
 
   if (!isMatch) {
-    user.registerFailedLogin();
+    await user.registerFailedLogin();
     await user.save();
 
     await logAuditEvent({
@@ -151,7 +151,7 @@ export const login = asyncHandler(async (req, res) => {
   user.lastLoginIp = req.ip || '';
   await user.save();
 
-  const { accessToken, refreshToken } = generateTokenPair({
+  const { accessToken, refreshToken } = await generateTokenPair({
     userId: user._id,
     role: user.role,
     tokenVersion: user.tokenVersion,

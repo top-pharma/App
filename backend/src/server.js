@@ -65,6 +65,7 @@ import backupRoutes from './routes/backupRoutes.js';
 // ─── Routes — Settings (Phase D) ───
 import settingsRoutes from './routes/settingsRoutes.js';
 import auditLogRoutes from './routes/auditLogRoutes.js';
+import salesRepTransactionRoutes from './routes/salesRepTransactionRoutes.js';
 
 const app = express();
 
@@ -137,6 +138,7 @@ app.use('/api/cash-funds', cashFundRoutes);
 app.use('/api/bank-accounts', bankAccountRoutes);
 app.use('/api/cash-transactions', cashTransactionRoutes);
 app.use('/api/accounting-entries', accountingEntryRoutes);
+app.use('/api/sales-rep-transactions', salesRepTransactionRoutes);
 
 /* ═════════════════════════════════════════════════════════════
  * 7) Routes — Phase 4 (Reports)

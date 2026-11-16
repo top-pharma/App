@@ -2,6 +2,10 @@
  * @file reportValidator.js
  * @description
  * مخططات Zod لمدخلات التقارير.
+ *
+ * ✅ v10.4 (2026-11-15):
+ * - حُذف `checksReportSchema` (Check أُلغي في 🅲).
+ * - حُذف `'check'` من `cashTransactionsSchema.method` (Check أُلغي في 🅲).
  */
 
 import { z } from 'zod';
@@ -29,7 +33,7 @@ const optionalObjectId = z
 const exportFormat = z.enum(['xlsx', 'pdf']).optional();
 
 /* ─────────────────────────────────────────────────────────────
- * Finance Reports
+ * Finance Reports — 5
  * ───────────────────────────────────────────────────────────── */
 
 export const trialBalanceSchema = z.object({
@@ -47,23 +51,14 @@ export const cashTransactionsSchema = z.object({
     direction: z.enum(['in', 'out', 'all']).default('all'),
     cashFundId: optionalObjectId,
     bankAccountId: optionalObjectId,
-    method: z.enum(['cash', 'bank', 'check', 'all']).default('all'),
+    // ✅ v10.4: حُذف 'check' (Check أُلغي)
+    method: z.enum(['cash', 'bank', 'all']).default('all'),
     format: exportFormat,
   }),
 });
 
 export const fundBalancesSchema = z.object({
   query: z.object({
-    format: exportFormat,
-  }),
-});
-
-export const checksReportSchema = z.object({
-  query: z.object({
-    from: optionalDateString,
-    to: optionalDateString,
-    status: z.enum(['pending', 'paid', 'bounced', 'cancelled', 'all']).default('all'),
-    type: z.enum(['incoming', 'outgoing', 'all']).default('all'),
     format: exportFormat,
   }),
 });
@@ -84,11 +79,12 @@ export const incomeSummarySchema = z.object({
   }),
 });
 
+// ✅ v10.4: حُذف checksReportSchema
+
 export default {
   trialBalanceSchema,
   cashTransactionsSchema,
   fundBalancesSchema,
-  checksReportSchema,
   expensesSchema,
   incomeSummarySchema,
 };

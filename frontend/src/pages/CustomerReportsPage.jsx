@@ -3,22 +3,13 @@
  * @description
  * صفحة تقارير العملاء — 2 تقارير.
  *
- *   1. أعمار الديون (aging)
- *   2. كشف حساب عميل (statement) — يتطلب اختيار عميل
- *
- * ⚠️ إصلاح 2026-11-11:
- *  - F1: إضافة buildExportParams (كانت مفقودة — ReferenceError).
- *  - F2: نقل ExportButtons إلى المكان الصحيح (داخل return).
+ * ✅ v10.5 (2026-11-15):
+ * - value: c.id || c._id (id من buildCustomerPayload).
  */
 
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import {
-  Clock,
-  BookUser,
-  RefreshCw,
-  AlertCircle,
-} from 'lucide-react';
+import { Clock, BookUser, RefreshCw, AlertCircle } from 'lucide-react';
 
 import KpiCards from '../components/Reports/KpiCards';
 import ExportButtons from '../components/Reports/ExportButtons';
@@ -63,12 +54,11 @@ export default function CustomerReportsPage() {
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
 
-  // تحميل العملاء لاختيارهم في "كشف حساب"
   useEffect(() => {
     (async () => {
       try {
         const result = await listCustomers({ limit: 100 });
-        setCustomers(result?.items || result?.data?.items || []);
+        setCustomers(result?.items || []);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[customers]', err);
@@ -119,7 +109,6 @@ export default function CustomerReportsPage() {
     setError(null);
   };
 
-  // ✅ F1: buildExportParams (كانت مفقودة)
   const buildExportParams = () => {
     if (activeTab === 'aging') return { asOf: to };
     if (activeTab === 'statement') return { from, to };
@@ -144,131 +133,67 @@ export default function CustomerReportsPage() {
     }
     if (!data) return null;
 
-    /* ───── 1. أعمار الديون ───── */
     if (activeTab === 'aging') {
       const kpis = [
         { label: 'حالي', value: `${fmt(data.buckets.current)} SDG`, color: 'green' },
         { label: '1-30 يوم', value: `${fmt(data.buckets.d30)} SDG`, color: 'blue' },
         { label: '31-60 يوم', value: `${fmt(data.buckets.d60)} SDG`, color: 'orange' },
         { label: '61-90 يوم', value: `${fmt(data.buckets.d90)} SDG`, color: 'orange' },
-        {
-          label: '+90 يوم',
-          value: `${fmt(data.buckets.d90plus)} SDG`,
-          color: 'red',
-        },
+        { label: '+90 يوم', value: `${fmt(data.buckets.d90plus)} SDG`, color: 'red' },
       ];
 
       const columns = [
         { key: 'name', label: 'العميل', align: 'start' },
         { key: 'phone', label: 'الهاتف', align: 'start' },
         { key: 'invoicesCount', label: 'الفواتير', align: 'center' },
-        {
-          key: 'current',
-          label: 'حالي',
-          align: 'end',
-          render: (r) => fmt(r.current),
-        },
-        {
-          key: 'd30',
-          label: '1-30',
-          align: 'end',
-          render: (r) => fmt(r.d30),
-        },
-        {
-          key: 'd60',
-          label: '31-60',
-          align: 'end',
-          render: (r) => fmt(r.d60),
-        },
-        {
-          key: 'd90',
-          label: '61-90',
-          align: 'end',
-          render: (r) => fmt(r.d90),
-        },
+        { key: 'current', label: 'حالي', align: 'end', render: (r) => fmt(r.current) },
+        { key: 'd30', label: '1-30', align: 'end', render: (r) => fmt(r.d30) },
+        { key: 'd60', label: '31-60', align: 'end', render: (r) => fmt(r.d60) },
+        { key: 'd90', label: '61-90', align: 'end', render: (r) => fmt(r.d90) },
         {
           key: 'd90plus',
           label: '+90',
           align: 'end',
           render: (r) => (
-            <span className={r.d90plus > 0 ? 'text-red-700 font-semibold' : ''}>
-              {fmt(r.d90plus)}
-            </span>
+            <span className={r.d90plus > 0 ? 'text-red-700 font-semibold' : ''}>{fmt(r.d90plus)}</span>
           ),
         },
         {
           key: 'total',
           label: 'الإجمالي',
           align: 'end',
-          render: (r) => (
-            <span className="font-semibold text-neutral-900">{fmt(r.total)}</span>
-          ),
+          render: (r) => <span className="font-semibold text-neutral-900">{fmt(r.total)}</span>,
         },
       ];
 
       return (
         <div className="space-y-4">
           <KpiCards items={kpis} />
-          <Table
-            columns={columns}
-            data={data.lines}
-            emptyMessage="لا توجد ديون مستحقة"
-          />
+          <Table columns={columns} data={data.lines} emptyMessage="لا توجد ديون مستحقة" />
         </div>
       );
     }
 
-    /* ───── 2. كشف حساب ───── */
     if (activeTab === 'statement') {
       const kpis = [
-        {
-          label: 'الرصيد الافتتاحي',
-          value: `${fmt(data.openingBalance)} SDG`,
-          color: 'neutral',
-        },
-        {
-          label: 'إجمالي المدين',
-          value: `${fmt(data.totals.debit)} SDG`,
-          color: 'blue',
-        },
-        {
-          label: 'إجمالي الدائن',
-          value: `${fmt(data.totals.credit)} SDG`,
-          color: 'green',
-        },
-        {
-          label: 'الرصيد الختامي',
-          value: `${fmt(data.closingBalance)} SDG`,
-          color: data.closingBalance > 0 ? 'orange' : 'green',
-        },
+        { label: 'الرصيد الافتتاحي', value: `${fmt(data.openingBalance)} SDG`, color: 'neutral' },
+        { label: 'إجمالي المدين', value: `${fmt(data.totals.debit)} SDG`, color: 'blue' },
+        { label: 'إجمالي الدائن', value: `${fmt(data.totals.credit)} SDG`, color: 'green' },
+        { label: 'الرصيد الختامي', value: `${fmt(data.closingBalance)} SDG`, color: data.closingBalance > 0 ? 'orange' : 'green' },
       ];
 
       const columns = [
         { key: 'dateLabel', label: 'التاريخ', align: 'center' },
         { key: 'typeLabel', label: 'النوع', align: 'center' },
         { key: 'ref', label: 'المرجع', align: 'start' },
-        {
-          key: 'debit',
-          label: 'مدين',
-          align: 'end',
-          render: (r) => fmt(r.debit),
-        },
-        {
-          key: 'credit',
-          label: 'دائن',
-          align: 'end',
-          render: (r) => fmt(r.credit),
-        },
+        { key: 'debit', label: 'مدين', align: 'end', render: (r) => fmt(r.debit) },
+        { key: 'credit', label: 'دائن', align: 'end', render: (r) => fmt(r.credit) },
         {
           key: 'balance',
           label: 'الرصيد',
           align: 'end',
           render: (r) => (
-            <span
-              className={
-                r.balance < 0 ? 'text-red-700 font-semibold' : 'text-green-700'
-              }
-            >
+            <span className={r.balance < 0 ? 'text-red-700 font-semibold' : 'text-green-700'}>
               {fmt(r.balance)}
             </span>
           ),
@@ -280,17 +205,11 @@ export default function CustomerReportsPage() {
           <div className="bg-white border border-neutral-200 rounded-xl p-4 shadow-sm">
             <p className="text-sm text-neutral-600">
               العميل: <strong className="text-neutral-900">{data.customer?.name}</strong>
-              {data.customer?.phone && (
-                <span className="text-neutral-500"> — {data.customer.phone}</span>
-              )}
+              {data.customer?.phone && <span className="text-neutral-500"> — {data.customer.phone}</span>}
             </p>
           </div>
           <KpiCards items={kpis} />
-          <Table
-            columns={columns}
-            data={data.lines}
-            emptyMessage="لا توجد حركات في هذه الفترة"
-          />
+          <Table columns={columns} data={data.lines} emptyMessage="لا توجد حركات في هذه الفترة" />
         </div>
       );
     }
@@ -307,7 +226,6 @@ export default function CustomerReportsPage() {
             {activeTab === 'aging' ? `كما في ${to}` : `${from} — ${to}`}
           </p>
         </div>
-        {/* ✅ F2: ExportButtons في المكان الصحيح */}
         {activeTab === 'aging' && (
           <ExportButtons
             reportName="aging"
@@ -336,9 +254,7 @@ export default function CustomerReportsPage() {
               type="button"
               onClick={() => setTab(t.key)}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                isActive
-                  ? 'bg-primary-800 text-white shadow-sm'
-                  : 'text-neutral-700 hover:bg-white'
+                isActive ? 'bg-primary-800 text-white shadow-sm' : 'text-neutral-700 hover:bg-white'
               }`}
             >
               <Icon size={14} />
@@ -352,36 +268,21 @@ export default function CustomerReportsPage() {
         <div className="flex flex-wrap items-end gap-3">
           {activeTab === 'aging' ? (
             <div className="w-40">
-              <Input
-                label="كما في"
-                type="date"
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-              />
+              <Input label="كما في" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
             </div>
           ) : (
             <>
               <div className="w-40">
-                <Input
-                  label="من"
-                  type="date"
-                  value={from}
-                  onChange={(e) => setFrom(e.target.value)}
-                />
+                <Input label="من" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
               </div>
               <div className="w-40">
-                <Input
-                  label="إلى"
-                  type="date"
-                  value={to}
-                  onChange={(e) => setTo(e.target.value)}
-                />
+                <Input label="إلى" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
               </div>
               <Select
                 label="العميل"
                 value={customerId}
                 onChange={(e) => setCustomerId(e.target.value)}
-                options={customers.map((c) => ({ value: c._id, label: c.name }))}
+                options={customers.map((c) => ({ value: c.id || c._id, label: c.name }))}
                 placeholder="— اختر عميلاً —"
                 containerClassName="w-64"
               />
@@ -389,16 +290,8 @@ export default function CustomerReportsPage() {
           )}
 
           <div className="flex gap-2 ms-auto">
-            <Button variant="secondary" size="sm" onClick={handleReset}>
-              إعادة تعيين
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={loadReport}
-              disabled={loading}
-              icon={RefreshCw}
-            >
+            <Button variant="secondary" size="sm" onClick={handleReset}>إعادة تعيين</Button>
+            <Button variant="primary" size="sm" onClick={loadReport} disabled={loading} icon={RefreshCw}>
               {loading ? 'جارٍ...' : 'تحديث'}
             </Button>
           </div>

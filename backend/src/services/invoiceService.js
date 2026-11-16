@@ -6,18 +6,19 @@
  * Phase 2: إنشاء، اعتماد، دفع، إلغاء، عمولة، FEFO.
  * Phase 2.5: مسودات (draft)، تقييد أسعار، إصلاح double-deduction.
  * Phase 3: ربط بصندوق نقدي (cashFundId)، قيود محاسبية تلقائية، COGS.
- * Phase A (2026-11-07): إصلاح 7 تناقضات (A1-A7):
- *   A1. issueStock({ items, user }) → bulkIssueStock({ warehouseId, lines }) + بناء items
- *   A2. returnStock({ issuedLots, user }) → returnStock({ itemId, warehouseId, batch, quantity, meta }) × N
- *   A3. validateInvoicePrices({ items, user, overrideReason }) → validateInvoicePrices({ items, warehouseId, req })
- *   A4. Invoice.create({ discountAmount }) → Invoice.create({ discount: { computedAmount } })
- *   A5. items[].itemId → items[].item (يخالف Invoice.js)
- *   A6. finalizeInvoice يستدعي issueStock — نفس A1
- *   A7. cancelInvoice يستدعي returnStock — نفس A2
+ * Phase A (2026-11-07): إصلاح 7 تناقضات (A1-A7).
+ * Phase A.10 (2026-11-08): batch manual mode.
  *
- * ✅ Phase A.10 (2026-11-08):
- *   - issueStockAndBuildItems يمرّر `batch` لكل سطر إلى bulkIssueStock (manual mode).
- *   - حذف التحقق المزدوج `if (line._requestedBatch)` — issueStock يتولاه.
+ * ✅ v10.9 (2026-11-16):
+ * - createCommissionForInvoice: إصلاح 8 أخطاء:
+ *   1. baseCommission نص (وليس كائن) — baseRate رقم.
+ *   2. tiers: minSales/maxSales/bonusRate (وليس minAmount/maxAmount/bonus).
+ *   3. direction: 'credit' (وليس 'in').
+ *   4. transactionNumber: مُولَّد تلقائياً (required).
+ *   5. status: 'approved' (بدل 'pending').
+ *   6. approvedBy/approvedAt: تُملأ.
+ *   7. bonusRate: نسبة من subtotal (وليس مبلغ ثابت).
+ *   8. invoice.commission: يُحدَّث فقط عند النجاح.
  *
  * المبادئ:
  *  - كل فاتورة نقدية/جزئية → CashTransaction + SALE_CASH + COGS.
@@ -71,6 +72,31 @@ const generateInvoiceNumber = async () => {
 };
 
 /**
+ * ✅ v10.9 — يُولّد رقم حركة مندوب فريد: SRT-YYYYMMDD-0001
+ */
+const generateSalesRepTransactionNumber = async () => {
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+  const prefix = `SRT-${dateStr}-`;
+
+  const lastTx = await SalesRepTransaction.findOne({
+    transactionNumber: { $regex: `^${prefix}` },
+  })
+    .sort({ transactionNumber: -1 })
+    .select('transactionNumber')
+    .lean();
+
+  let seq = 1;
+  if (lastTx?.transactionNumber) {
+    const parts = lastTx.transactionNumber.split('-');
+    const lastSeq = parseInt(parts[parts.length - 1], 10);
+    if (!Number.isNaN(lastSeq)) seq = lastSeq + 1;
+  }
+
+  return `${prefix}${String(seq).padStart(4, '0')}`;
+};
+
+/**
  * يحسب المجاميع من items + discount + taxRate.
  */
 const calculateTotals = (items, discountAmount = 0, taxRate = 0) => {
@@ -99,36 +125,20 @@ const calculateIssuedCost = (issuedLots) => {
 
 /**
  * A1 + Phase A.10: يصرف المخزون عبر bulkIssueStock ثم يبني invoice items الحقيقية.
- *
- * ✅ Phase A.10:
- *   - يمرّر `batch` (manual) أو `null` (FEFO) إلى bulkIssueStock.
- *   - حذف التحقق المزدوج `if (line._requestedBatch)` — issueStock يتولاه الآن.
- *
- * @param {Object} params
- * @param {Array} params.items - items الفاتورة (بعد Zod: [{ item, batch, quantity, unitPrice, unitCost }])
- * @param {string} params.warehouseId
- * @param {Object} params.user
- * @returns {Promise<{ issuedLots: Array, invoiceItems: Array }>}
- *   issuedLots: [{ stockId, batch, expiry, quantity, unitCost }] — مسطّحة، للـ rollback و COGS
- *   invoiceItems: [{ item, batch, expiry, quantity, unitPrice, total, unitCost }] — للفاتورة
  */
 const issueStockAndBuildItems = async ({ items, warehouseId, user }) => {
-  // ⚠️ Phase A.10: نبني lines لـ bulkIssueStock مع `batch` (manual) أو `null` (FEFO)
   const lines = items.map((it) => {
-    // batch: 'FEFO-AUTO' → null (FEFO mode)
-    // batch: 'BATCH-...' → 'BATCH-...' (manual mode)
     const requestedBatch =
       it.batch && it.batch !== 'FEFO-AUTO' ? String(it.batch).trim().toUpperCase() : null;
 
     return {
-      itemId: it.item,        // A5: `item` (وليس `itemId`)
+      itemId: it.item,
       quantity: Number(it.quantity),
-      batch: requestedBatch,  // ⚠️ Phase A.10: batch محدد أو null
+      batch: requestedBatch,
       _requestedUnitPrice: Number(it.unitPrice),
     };
   });
 
-  // bulkIssueStock: [{ itemId, issuedBatches: [...] }]
   const bulkResult = await bulkIssueStock({
     warehouseId,
     lines: lines.map(({ itemId, quantity, batch }) => ({ itemId, quantity, batch })),
@@ -152,14 +162,6 @@ const issueStockAndBuildItems = async ({ items, warehouseId, user }) => {
       );
     }
 
-    // ⚠️ Phase A.10: لا حاجة للتحقق من _requestedBatch هنا
-    // لأن bulkIssueStock → issueStock(batch) يتحقق من:
-    //   - وجود الدفعة (BATCH_NOT_AVAILABLE)
-    //   - كفاية الكمية (BATCH_INSUFFICIENT)
-    //   - الصلاحية (BATCH_EXPIRED)
-    // التحقق المزدوج كان يسبب تناقضاً (FEFO vs manual).
-
-    // نبني invoice item لكل دفعة مصروفة
     for (const b of batches) {
       const qty = Number(b.quantity);
       const unitCost = Number(b.unitCost || 0);
@@ -236,7 +238,6 @@ const validatePricesOrThrow = async ({ items, warehouseId, overrideReason, req }
     throw new AppError('الفاتورة تحتاج بنداً واحداً على الأقل', 400, 'EMPTY_ITEMS');
   }
 
-  // التوقيع الصحيح: { items: [{ item, batch, unitPrice, quantity }], warehouseId, req }
   const lines = items.map((it) => ({
     item: it.item,
     batch: it.batch,
@@ -247,10 +248,9 @@ const validatePricesOrThrow = async ({ items, warehouseId, overrideReason, req }
   const result = await priceValidationService.validateInvoicePrices({
     items: lines,
     warehouseId,
-    req: req || { user: null, rolePermissions: [] },  // fail-safe
+    req: req || { user: null, rolePermissions: [] },
   });
 
-  // أي بند BLOCKED → رفض
   const blocked = (result.results || []).filter((r) => r.status === 'BLOCKED');
   if (blocked.length > 0) {
     const first = blocked[0];
@@ -261,7 +261,6 @@ const validatePricesOrThrow = async ({ items, warehouseId, overrideReason, req }
     );
   }
 
-  // أي بند WARN_OVERRIDE → يحتاج overrideReason
   if (result.needsOverride && (!overrideReason || overrideReason.trim().length < 5)) {
     throw new AppError(
       'أحد الأسعار أقل من الحد الموصى به. يجب إدخال سبب تجاوز (5 أحرف على الأقل).',
@@ -274,7 +273,16 @@ const validatePricesOrThrow = async ({ items, warehouseId, overrideReason, req }
 };
 
 /**
- * يُنشئ Commission + SalesRepTransaction عند الاعتماد.
+ * ✅ v10.9 — يُنشئ Commission + SalesRepTransaction عند الاعتماد.
+ * إصلاح 8 أخطاء:
+ *   1. baseCommission نص (وليس كائن) — baseRate رقم.
+ *   2. tiers: minSales/maxSales/bonusRate.
+ *   3. direction: 'credit'.
+ *   4. transactionNumber: مُولَّد.
+ *   5. status: 'approved'.
+ *   6. approvedBy/approvedAt.
+ *   7. bonusRate: نسبة.
+ *   8. invoice.commission يُحدَّث فقط عند النجاح.
  */
 const createCommissionForInvoice = async (invoice, user) => {
   if (!invoice.salesRep || !invoice.items?.length) return null;
@@ -284,51 +292,75 @@ const createCommissionForInvoice = async (invoice, user) => {
     isActive: true,
   }).lean();
 
-  if (!commissionDoc) return null;
+  if (!commissionDoc) {
+    logger.debug(`[invoiceService] لا commission doc للمندوب ${invoice.salesRep} — تخطي.`);
+    return null;
+  }
 
   let totalCommission = 0;
 
-  const base = commissionDoc.baseCommission || {};
-  if (base.type === 'percentage') {
-    totalCommission += round2((invoice.subtotal * base.value) / 100);
-  } else if (base.type === 'fixed') {
-    totalCommission += round2(base.value || 0);
+  // ✅ v10.9: baseCommission نص — baseRate رقم
+  const baseType = commissionDoc.baseCommission || 'percentage';
+  const baseRate = Number(commissionDoc.baseRate) || 0;
+
+  if (baseType === 'percentage') {
+    totalCommission += round2((invoice.subtotal * baseRate) / 100);
+  } else if (baseType === 'fixed') {
+    totalCommission += round2(baseRate);
   }
 
+  // ✅ v10.9: tiers — minSales/maxSales/bonusRate (نسبة)
   if (Array.isArray(commissionDoc.tiers)) {
     for (const tier of commissionDoc.tiers) {
       if (
-        invoice.subtotal >= tier.minAmount &&
-        invoice.subtotal < (tier.maxAmount || Infinity)
+        invoice.subtotal >= (tier.minSales || 0) &&
+        invoice.subtotal <= (tier.maxSales || Infinity)
       ) {
-        totalCommission += round2(tier.bonus || 0);
+        totalCommission += round2(
+          (invoice.subtotal * (tier.bonusRate || 0)) / 100
+        );
         break;
       }
     }
   }
 
-  if (totalCommission <= 0) return null;
+  if (totalCommission <= 0) {
+    logger.debug(`[invoiceService] لا عمولة للفاتورة ${invoice.invoiceNumber} (totalCommission=0).`);
+    return null;
+  }
 
+  // ✅ v10.9: transactionNumber مُولَّد
+  const transactionNumber = await generateSalesRepTransactionNumber();
+
+  // ✅ v10.9: direction 'credit' + status 'approved'
   const transaction = await SalesRepTransaction.create({
+    transactionNumber,
     salesRep: invoice.salesRep,
     type: 'commission',
+    direction: 'credit',
     amount: totalCommission,
-    direction: 'in',
     description: `عمولة فاتورة ${invoice.invoiceNumber}`,
     referenceType: 'Invoice',
     referenceId: invoice._id,
     transactionDate: new Date(),
+    status: 'approved',
+    approvedBy: user?._id || null,
+    approvedAt: new Date(),
     createdBy: user?._id || null,
   });
 
   invoice.commission = {
-    rate: base.type === 'percentage' ? base.value : 0,
+    rate: baseType === 'percentage' ? baseRate : 0,
     amount: totalCommission,
     transactionId: transaction._id,
     calculatedAt: new Date(),
     isPaid: false,
   };
   await invoice.save();
+
+  logger.info(
+    `[invoiceService] عمولة ${invoice.invoiceNumber}: ${totalCommission} SDG (${transaction.transactionNumber})`
+  );
 
   return transaction;
 };
@@ -355,15 +387,6 @@ const buildDiscountObject = ({ discount, computedAmount }) => {
  * 2) createInvoice — إنشاء فاتورة مباشرة
  * ───────────────────────────────────────────────────────────── */
 
-/**
- * createInvoice — إنشاء فاتورة مباشرة (نقدي / آجل / أقساط).
- *
- * @param {Object} params
- * @param {Object} params.body
- * @param {Object} params.user
- * @param {Object} [params.req] - Express req (لـ priceValidationService + logAuditEvent)
- * @returns {Promise<Object>}
- */
 export const createInvoice = async ({ body, user, req }) => {
   const {
     pharmacy,
@@ -409,7 +432,7 @@ export const createInvoice = async ({ body, user, req }) => {
   // ─── 4) التحقق من الأسعار (A3) ───
   await validatePricesOrThrow({ items, warehouseId: warehouse, overrideReason, req });
 
-  // ─── 5) صرف المخزون + بناء items الحقيقية (A1, A5, Phase A.4, Phase A.10) ───
+  // ─── 5) صرف المخزون + بناء items الحقيقية ───
   let issuedLots = [];
   let invoiceItems = [];
 
@@ -447,7 +470,7 @@ export const createInvoice = async ({ body, user, req }) => {
   // ─── 9) توليد رقم الفاتورة ───
   const invoiceNumber = await generateInvoiceNumber();
 
-  // ─── 10) إنشاء الفاتورة (A4, A5) ───
+  // ─── 10) إنشاء الفاتورة ───
   let invoice;
   try {
     invoice = await Invoice.create({
@@ -527,7 +550,6 @@ export const createInvoice = async ({ body, user, req }) => {
       );
     }
 
-    // نقدي بلا دفع → نعتبرها آجلة
     if (paidAmount === 0 && paymentType === 'cash') {
       await accountingService.createSaleCreditEntry({
         amount: total,
@@ -560,7 +582,7 @@ export const createInvoice = async ({ body, user, req }) => {
   else invoice.status = 'pending';
   await invoice.save();
 
-  // ─── 13) Commission ───
+  // ─── 13) Commission (✅ v10.9) ───
   await createCommissionForInvoice(invoice, user);
 
   // ─── 14) Audit ───
@@ -715,7 +737,7 @@ export const updateDraft = async ({ invoiceId, body, user }) => {
 };
 
 /* ─────────────────────────────────────────────────────────────
- * 5) finalizeInvoice — اعتماد مسودة (A6)
+ * 5) finalizeInvoice — اعتماد مسودة
  * ───────────────────────────────────────────────────────────── */
 export const finalizeInvoice = async ({ invoiceId, body, user, req }) => {
   const invoice = await Invoice.findById(invoiceId);
@@ -754,7 +776,7 @@ export const finalizeInvoice = async ({ invoiceId, body, user, req }) => {
     await validateCreditLimit(customer, invoice.total - paidAmount);
   }
 
-  // ─── 3) التحقق من الأسعار (A3) ───
+  // ─── 3) التحقق من الأسعار ───
   await validatePricesOrThrow({
     items: invoice.items,
     warehouseId: invoice.warehouse,
@@ -762,7 +784,7 @@ export const finalizeInvoice = async ({ invoiceId, body, user, req }) => {
     req,
   });
 
-  // ─── 4) صرف المخزون (A6 — نفس A1 + Phase A.10) ───
+  // ─── 4) صرف المخزون ───
   const { issuedLots, invoiceItems } = await issueStockAndBuildItems({
     items: invoice.items.map((it) => ({
       item: it.item,
@@ -874,7 +896,7 @@ export const finalizeInvoice = async ({ invoiceId, body, user, req }) => {
   else invoice.status = 'pending';
   await invoice.save();
 
-  // ─── 8) Commission ───
+  // ─── 8) Commission (✅ v10.9) ───
   await createCommissionForInvoice(invoice, user);
 
   // ─── 9) Audit ───
@@ -980,7 +1002,7 @@ export const registerPayment = async ({
 };
 
 /* ─────────────────────────────────────────────────────────────
- * 7) cancelInvoice — إلغاء فاتورة (A7)
+ * 7) cancelInvoice — إلغاء فاتورة
  * ───────────────────────────────────────────────────────────── */
 export const cancelInvoice = async ({ invoiceId, reason, user }) => {
   const invoice = await Invoice.findById(invoiceId);
@@ -996,7 +1018,7 @@ export const cancelInvoice = async ({ invoiceId, reason, user }) => {
     );
   }
 
-  // ─── 1) عكس Stock (A7) ───
+  // ─── 1) عكس Stock ───
   if (invoice.items?.length > 0) {
     for (const it of invoice.items) {
       try {

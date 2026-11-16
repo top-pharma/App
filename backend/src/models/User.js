@@ -1,28 +1,17 @@
 /**
  * @file User.js
  * @description
- * نموذج المستخدم (يدعم الأدوار الخمسة).
+ * نموذج المستخدم (يدعم الأدوار الستة).
  *
- * لماذا هذا الملف؟
- * - كل المستخدمين (مدير، محاسب، مندوب، أمين مخزن، صيدلية) يُنشَؤون من نفس
- *   النموذج، والتفريق بينهم عبر حقل `role` فقط.
- * - نحتفظ بـ `tokenVersion` لإبطال كل الجلسات عند تغيير كلمة المرور.
- * - نحتفظ بحقول تتبّع تسجيل الدخول (آخر دخول، عدد المحاولات الفاشلة،
- *   قفل الحساب المؤقت) لدعم الأمان.
- * - كلمة المرور مُختارة `select: false` لكيلا تُعاد في أي استعلام بالخطأ.
- * - ندعم ربط المستخدم بكيان (مندوب ↔ SalesRep، صيدلية ↔ Customer) اختيارياً
- *   عبر `linkedEntity`.
+ * ✅ v10.11 (2026-11-16):
+ * - registerFailedLogin: async — يقرأ maxFailedLogins + lockDurationMinutes من Settings.
+ * - password: minlength ديناميكي (يُتحقق في authValidator/controller — لا هنا).
  */
 
 import mongoose from 'mongoose';
 
 const { Schema, model } = mongoose;
 
-/**
- * أسماء الأدوار المدعومة (يجب أن تطابق Role.name).
- * @readonly
- * @enum {string}
- */
 export const USER_ROLES = Object.freeze({
   ADMIN: 'admin',
   STOREKEEPER: 'storekeeper',
@@ -32,24 +21,13 @@ export const USER_ROLES = Object.freeze({
   HR_MANAGER: 'hr_manager',
 });
 
-/**
- * أنواع الكيانات المرتبطة (اختيارية).
- * @readonly
- * @enum {string}
- */
 export const LINKED_ENTITY_TYPES = Object.freeze({
   CUSTOMER: 'Customer',
   NONE: null,
 });
 
-/**
- * Schema المستخدم.
- */
 const userSchema = new Schema(
   {
-    /**
-     * الاسم الكامل.
-     */
     name: {
       type: String,
       required: [true, 'الاسم مطلوب.'],
@@ -58,9 +36,6 @@ const userSchema = new Schema(
       maxlength: [100, 'الاسم طويل جداً.'],
     },
 
-    /**
-     * البريد الإلكتروني (فريد، lowercase).
-     */
     email: {
       type: String,
       required: [true, 'البريد الإلكتروني مطلوب.'],
@@ -71,28 +46,18 @@ const userSchema = new Schema(
       match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'صيغة البريد الإلكتروني غير صحيحة.'],
     },
 
-    /**
-     * رقم الهاتف (اختياري، لتواصل الشركة).
-     */
     phone: {
       type: String,
       trim: true,
       default: '',
     },
 
-    /**
-     * كلمة المرور المشفّرة.
-     * select: false يمنع إعادتها بالخطأ في أي استعلام.
-     */
     password: {
       type: String,
       required: [true, 'كلمة المرور مطلوبة.'],
       select: false,
     },
 
-    /**
-     * اسم الدور (يطابق Role.name).
-     */
     role: {
       type: String,
       required: [true, 'الدور مطلوب.'],
@@ -103,11 +68,6 @@ const userSchema = new Schema(
       index: true,
     },
 
-    /**
-     * ربط اختياري بكيان آخر.
-     * - المندوب: لا نربطه بكيان (يكفي الدور).
-     * - الصيدلية: نربطها بـ Customer لعرض فواتيرها فقط.
-     */
     linkedEntity: {
       type: {
         type: String,
@@ -121,79 +81,50 @@ const userSchema = new Schema(
       },
     },
 
-    /**
-     * حالة الحساب.
-     */
     isActive: {
       type: Boolean,
       default: true,
       index: true,
     },
 
-    /**
-     * رقم نسخة التوكن — يُزاد عند تغيير كلمة المرور لإبطال كل الجلسات.
-     */
     tokenVersion: {
       type: Number,
       default: 0,
       min: 0,
     },
 
-    /**
-     * آخر تسجيل دخول ناجح.
-     */
     lastLoginAt: {
       type: Date,
       default: null,
     },
 
-    /**
-     * آخر IP استُخدم في تسجيل الدخول.
-     */
     lastLoginIp: {
       type: String,
       default: '',
     },
 
-    /**
-     * عدد محاولات تسجيل الدخول الفاشلة المتتالية.
-     */
     failedLoginAttempts: {
       type: Number,
       default: 0,
       min: 0,
     },
 
-    /**
-     * إذا كان الحساب مقفلاً مؤقتاً، هذا وقت فك القفل.
-     * null = غير مقفل.
-     */
     lockUntil: {
       type: Date,
       default: null,
     },
 
-    /**
-     * هل يجب على المستخدم تغيير كلمة المرور في أول دخول؟
-     * يُفعَّل عند الإنشاء بكلمة مرور مؤقتة.
-     */
     mustChangePassword: {
       type: Boolean,
       default: false,
     },
 
-    /**
-     * ملاحظات إدارية (اختيارية).
-     */
     notes: {
       type: String,
       trim: true,
       default: '',
     },
 
-    /**
-     * من أنشأ هذا المستخدم (للتتبع).
-     */
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: 'User',
@@ -213,15 +144,11 @@ const userSchema = new Schema(
   }
 );
 
-/**
- * فهارس مركّبة لتسريع الاستعلامات الشائعة.
- */
 userSchema.index({ role: 1, isActive: 1 });
 userSchema.index({ isActive: 1, createdAt: -1 });
 
 /**
  * هل الحساب مقفل حالياً؟
- * @returns {boolean}
  */
 userSchema.methods.isLocked = function isLocked() {
   return Boolean(this.lockUntil && this.lockUntil.getTime() > Date.now());
@@ -229,7 +156,6 @@ userSchema.methods.isLocked = function isLocked() {
 
 /**
  * إعادة ضبط عدّاد المحاولات الفاشلة وحالة القفل.
- * @returns {void}
  */
 userSchema.methods.resetLoginAttempts = function resetLoginAttempts() {
   this.failedLoginAttempts = 0;
@@ -237,21 +163,33 @@ userSchema.methods.resetLoginAttempts = function resetLoginAttempts() {
 };
 
 /**
- * تسجيل محاولة فاشلة، مع قفل مؤقت بعد 5 محاولات لمدة 15 دقيقة.
- * @returns {void}
+ * ✅ v10.11: تسجيل محاولة فاشلة — async — يقرأ من Settings.
+ * - maxFailedLogins (default 5)
+ * - lockDurationMinutes (default 15)
  */
-userSchema.methods.registerFailedLogin = function registerFailedLogin() {
+userSchema.methods.registerFailedLogin = async function registerFailedLogin() {
   this.failedLoginAttempts = (this.failedLoginAttempts || 0) + 1;
 
-  // نُقفل الحساب بعد 5 محاولات فاشلة لمدة 15 دقيقة.
-  if (this.failedLoginAttempts >= 5) {
-    this.lockUntil = new Date(Date.now() + 15 * 60 * 1000);
+  try {
+    // Dynamic import لتجنب circular dependency (Settings → User)
+    const { Settings } = await import('./Settings.js');
+    const settings = await Settings.getSettings();
+    const maxFailed = settings.security?.maxFailedLogins ?? 5;
+    const lockMinutes = settings.security?.lockDurationMinutes ?? 15;
+
+    if (this.failedLoginAttempts >= maxFailed) {
+      this.lockUntil = new Date(Date.now() + lockMinutes * 60 * 1000);
+    }
+  } catch {
+    // Fallback — default
+    if (this.failedLoginAttempts >= 5) {
+      this.lockUntil = new Date(Date.now() + 15 * 60 * 1000);
+    }
   }
 };
 
 /**
  * إبطال كل الجلسات الحالية للمستخدم.
- * @returns {void}
  */
 userSchema.methods.invalidateSessions = function invalidateSessions() {
   this.tokenVersion = (this.tokenVersion || 0) + 1;

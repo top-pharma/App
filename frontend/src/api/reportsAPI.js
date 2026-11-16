@@ -1,25 +1,18 @@
-
 /**
  * @file reportsAPI.js
  * @description
  * API client للتقارير — مالية الآن + مبيعات/عملاء/موردين/مخزون لاحقاً.
  *
- * المبادئ:
- *  - كل دالة get → data.data (يستدعي axiosInstance).
- *  - التصدير: responseType: 'blob'.
- *  - ملف filename يُستخرج من content-disposition.
+ * ✅ v10.4 (2026-11-15):
+ * - حُذف `checks` من `REPORT_PATHS` (Check أُلغي في 🅲).
  */
 
 import axiosInstance from './axiosInstance.js';
 
 /* ─────────────────────────────────────────────────────────────
- * 1) التقارير المالية — 6
+ * 1) التقارير المالية — 5
  * ───────────────────────────────────────────────────────────── */
 
-/**
- * ميزان المراجعة.
- * @param {{from: string, to: string}} params
- */
 export async function getTrialBalance({ from, to }) {
   const { data } = await axiosInstance.get('/reports/finance/trial-balance', {
     params: { from, to },
@@ -27,10 +20,6 @@ export async function getTrialBalance({ from, to }) {
   return data.data;
 }
 
-/**
- * الحركات النقدية.
- * @param {Object} params - { from, to, direction, method, cashFundId, bankAccountId }
- */
 export async function getCashTransactions(params) {
   const { data } = await axiosInstance.get('/reports/finance/cash-transactions', {
     params,
@@ -38,18 +27,11 @@ export async function getCashTransactions(params) {
   return data.data;
 }
 
-/**
- * أرصدة الصناديق والبنك.
- */
 export async function getFundBalances() {
   const { data } = await axiosInstance.get('/reports/finance/fund-balances');
   return data.data;
 }
 
-/**
- * المصروفات.
- * @param {{from: string, to: string}} params
- */
 export async function getExpenses({ from, to }) {
   const { data } = await axiosInstance.get('/reports/finance/expenses', {
     params: { from, to },
@@ -57,10 +39,6 @@ export async function getExpenses({ from, to }) {
   return data.data;
 }
 
-/**
- * الإيرادات - المصروفات.
- * @param {{from: string, to: string}} params
- */
 export async function getIncomeSummary({ from, to }) {
   const { data } = await axiosInstance.get('/reports/finance/income-summary', {
     params: { from, to },
@@ -72,25 +50,14 @@ export async function getIncomeSummary({ from, to }) {
  * 2) التصدير الموحد
  * ───────────────────────────────────────────────────────────── */
 
-/**
- * خريطة اسم التقرير → مساره (يُستخدم في التصدير).
- */
 const REPORT_PATHS = Object.freeze({
   'trial-balance': '/reports/finance/trial-balance',
   'cash-transactions': '/reports/finance/cash-transactions',
   'fund-balances': '/reports/finance/fund-balances',
-  checks: '/reports/finance/checks',
   expenses: '/reports/finance/expenses',
   'income-summary': '/reports/finance/income-summary',
 });
 
-/**
- * تصدير تقرير مالي.
- * @param {string} reportName - اسم التقرير (من REPORT_PATHS)
- * @param {'xlsx'|'pdf'} format
- * @param {Object} params - فلاتر التقرير
- * @returns {Promise<{blob: Blob, filename: string}>}
- */
 export async function exportFinanceReport(reportName, format, params = {}) {
   const path = REPORT_PATHS[reportName];
   if (!path) {

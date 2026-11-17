@@ -3,15 +3,11 @@
  * @description
  * منطق إدارة المستخدمين (Admin only).
  *
- * لماذا هذا الملف؟
- * - متطلب: "المستخدمون (مدير، محاسب، مندوب، أمين مخزن، صيدلية) يُنشَؤون
- *   من داخل التطبيق بواسطة الأدمن".
- * - نُوفّر CRUD كاملاً + تفعيل/تعطيل + إعادة تعيين كلمة المرور.
- * - لا نحذف المستخدم فعلياً؛ نُعطّله فقط (isActive=false) للحفاظ على السجل.
- * - كلمة المرور تُولَّد تلقائياً إن لم تُمرَّر، وتُعاد في الاستجابة مرة واحدة.
- * - نمنع الأدمن من تعطيل نفسه أو تغيير دوره (تفادي قفل النظام).
- * - نقرأ قيم الاستعلام من req.validatedQuery (يعبّئها validateMiddleware)
- *   لأن Express 4 يمنع الكتابة على req.query مباشرة.
+ * ✅ v10.13 (2026-11-17):
+ * - ensureRoleExists: name → code + حذف isActive.
+ *   (السابق: Role.findOne({ name: roleName, isActive: true })
+ *    لكن Role.name = 'مندوب' و Role.code = 'sales_rep'
+ *    و Role لا يحتوي isActive → null → ROLE_NOT_FOUND)
  */
 
 import { AUDIT_ACTIONS } from '../models/AuditLog.js';
@@ -26,8 +22,6 @@ import { logger } from '../utils/logger.js';
 
 /**
  * بناء استجابة موحّدة للمستخدم (بلا حقول حساسة).
- * @param {import('mongoose').Document} user
- * @returns {Object}
  */
 const buildUserPayload = (user) => ({
   id: user._id,
@@ -49,22 +43,18 @@ const buildUserPayload = (user) => ({
 });
 
 /**
- * التحقق من صحة الدور والصلاحيات المرتبطة.
- * @param {string} roleName
- * @returns {Promise<import('mongoose').Document>}
+ * ✅ v10.13: التحقق من صحة الدور — code (وليس name) — بدون isActive.
  */
-const ensureRoleExists = async (roleName) => {
-  const role = await Role.findOne({ name: roleName, isActive: true });
+const ensureRoleExists = async (roleCode) => {
+  const role = await Role.findOne({ code: roleCode });
   if (!role) {
-    throw new AppError(`الدور "${roleName}" غير موجود أو معطّل.`, 400, 'ROLE_NOT_FOUND');
+    throw new AppError(`الدور "${roleCode}" غير موجود.`, 400, 'ROLE_NOT_FOUND');
   }
   return role;
 };
 
 /**
  * التحقق من ربط الصيدلية بعميل موجود.
- * @param {Object} linkedEntity
- * @returns {Promise<import('mongoose').Document | null>}
  */
 const ensureCustomerExists = async (linkedEntity) => {
   if (!linkedEntity || linkedEntity.type !== 'Customer' || !linkedEntity.id) {
@@ -79,12 +69,6 @@ const ensureCustomerExists = async (linkedEntity) => {
 
 /**
  * GET /api/users
- * قائمة المستخدمين مع تصفية وبحث وصفحات.
- *
- * ملاحظة: نقرأ من req.validatedQuery لأن validateMiddleware يُخزّن
- * القيم المُحلَّلة (coerced) هناك، وليس في req.query (Express 4 للقراءة فقط).
- *
- * @type {import('express').RequestHandler}
  */
 export const listUsers = asyncHandler(async (req, res) => {
   const { page, limit, search, role, isActive, sortBy, sortOrder } =
@@ -132,8 +116,6 @@ export const listUsers = asyncHandler(async (req, res) => {
 
 /**
  * GET /api/users/:id
- *
- * @type {import('express').RequestHandler}
  */
 export const getUser = asyncHandler(async (req, res) => {
   const user = await User.findById(req.params.id).select('-password -__v');
@@ -150,26 +132,20 @@ export const getUser = asyncHandler(async (req, res) => {
 
 /**
  * POST /api/users
- * إنشاء مستخدم جديد.
- *
- * @type {import('express').RequestHandler}
  */
 export const createUser = asyncHandler(async (req, res) => {
   const { name, email, phone, role, password, mustChangePassword, linkedEntity, notes } = req.body;
 
-  // التحقق من الدور.
+  // ✅ v10.13: ensureRoleExists(role) — code
   await ensureRoleExists(role);
 
-  // التحقق من البريد (فريد).
   const existing = await User.findOne({ email });
   if (existing) {
     throw new AppError('البريد الإلكتروني مستخدم مسبقاً.', 409, 'EMAIL_TAKEN');
   }
 
-  // التحقق من ربط الصيدلية.
   await ensureCustomerExists(linkedEntity);
 
-  // كلمة المرور: إما من الطلب أو مولّدة.
   const isGenerated = !password;
   const rawPassword = password || generateRandomPassword(12);
   const hashedPassword = await hashPassword(rawPassword);
@@ -191,11 +167,11 @@ export const createUser = asyncHandler(async (req, res) => {
 
   // إرسال بريد ترحيبي (لا يُعطّل الإنشاء إن فشل).
   try {
-    const roleDoc = await Role.findOne({ name: role }).select('label');
+    const roleDoc = await Role.findOne({ code: role }).select('name');
     await sendWelcomeEmail({
       to: user.email,
       name: user.name,
-      roleLabel: roleDoc?.label || role,
+      roleLabel: roleDoc?.name || role,
       loginUrl: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/login`,
       temporaryPassword: isGenerated ? rawPassword : undefined,
     });
@@ -224,9 +200,6 @@ export const createUser = asyncHandler(async (req, res) => {
     success: true,
     data: {
       user: buildUserPayload(user),
-      /**
-       * نُعيد كلمة المرور المؤقتة مرة واحدة فقط إن وُلّدت.
-       */
       generatedPassword: isGenerated ? rawPassword : undefined,
     },
   });
@@ -234,9 +207,6 @@ export const createUser = asyncHandler(async (req, res) => {
 
 /**
  * PATCH /api/users/:id
- * تعديل بيانات مستخدم.
- *
- * @type {import('express').RequestHandler}
  */
 export const updateUser = asyncHandler(async (req, res) => {
   const { id } = req.params;
@@ -248,7 +218,6 @@ export const updateUser = asyncHandler(async (req, res) => {
     throw new AppError('المستخدم غير موجود.', 404, 'USER_NOT_FOUND');
   }
 
-  // نلتقط الحالة قبل التعديل لسجل التدقيق.
   const before = {
     name: user.name,
     email: user.email,
@@ -259,12 +228,11 @@ export const updateUser = asyncHandler(async (req, res) => {
     notes: user.notes,
   };
 
-  // التحقق من الدور الجديد إن وُجد.
+  // ✅ v10.13: ensureRoleExists(updates.role) — code
   if (updates.role && updates.role !== user.role) {
     await ensureRoleExists(updates.role);
   }
 
-  // التحقق من البريد الجديد إن وُجد.
   if (updates.email && updates.email !== user.email) {
     const existing = await User.findOne({ email: updates.email });
     if (existing) {
@@ -272,17 +240,14 @@ export const updateUser = asyncHandler(async (req, res) => {
     }
   }
 
-  // التحقق من ربط الصيدلية.
   if (updates.linkedEntity) {
     await ensureCustomerExists(updates.linkedEntity);
   }
 
-  // منع الأدمن من تعطيل نفسه.
   if (updates.isActive === false && String(user._id) === String(req.user._id)) {
     throw new AppError('لا يمكنك تعطيل حسابك الخاص.', 400, 'CANNOT_DISABLE_SELF');
   }
 
-  // منع الأدمن من تغيير دوره الخاص إلى غير admin.
   if (
     updates.role &&
     updates.role !== USER_ROLES.ADMIN &&
@@ -291,7 +256,6 @@ export const updateUser = asyncHandler(async (req, res) => {
     throw new AppError('لا يمكنك تغيير دورك الخاص.', 400, 'CANNOT_CHANGE_OWN_ROLE');
   }
 
-  // تطبيق التعديلات.
   const allowedFields = ['name', 'email', 'phone', 'role', 'isActive', 'linkedEntity', 'notes'];
   for (const field of allowedFields) {
     if (updates[field] !== undefined) {
@@ -330,9 +294,6 @@ export const updateUser = asyncHandler(async (req, res) => {
 
 /**
  * DELETE /api/users/:id
- * تعطيل مستخدم (لا نحذف فعلياً للحفاظ على السجل).
- *
- * @type {import('express').RequestHandler}
  */
 export const deleteUser = asyncHandler(async (req, res) => {
   const { id } = req.params;
@@ -375,9 +336,6 @@ export const deleteUser = asyncHandler(async (req, res) => {
 
 /**
  * PATCH /api/users/:id/toggle-active
- * تبديل حالة التفعيل.
- *
- * @type {import('express').RequestHandler}
  */
 export const toggleUserActive = asyncHandler(async (req, res) => {
   const { id } = req.params;
@@ -415,9 +373,6 @@ export const toggleUserActive = asyncHandler(async (req, res) => {
 
 /**
  * POST /api/users/:id/reset-password
- * إعادة تعيين كلمة مرور مستخدم بواسطة الأدمن.
- *
- * @type {import('express').RequestHandler}
  */
 export const adminResetPassword = asyncHandler(async (req, res) => {
   const { id } = req.params;
